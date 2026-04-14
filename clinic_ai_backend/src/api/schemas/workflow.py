@@ -1,6 +1,9 @@
 """Workflow API schemas module."""
+from __future__ import annotations
+
 from pydantic import BaseModel
 
+from src.api.schemas.vitals import LatestVitalsResponse, VitalsFormResponse
 
 class ChiefComplaintSection(BaseModel):
     """Chief complaint section."""
@@ -48,3 +51,12 @@ class PreVisitSummaryResponse(BaseModel):
     language: str
     status: str
     sections: PreVisitSections
+
+
+class DoctorAppointmentViewResponse(BaseModel):
+    """Doctor view with summary and vitals context."""
+
+    patient_id: str
+    pre_visit_summary: PreVisitSummaryResponse | None
+    latest_vitals_form: VitalsFormResponse | None
+    latest_vitals: LatestVitalsResponse | None

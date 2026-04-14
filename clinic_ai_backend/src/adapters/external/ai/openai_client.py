@@ -9,7 +9,7 @@ from src.core.config import get_settings
 
 
 class OpenAIQuestionClient:
-    """Simple OpenAI wrapper for intake and pre-visit generation."""
+    """Simple OpenAI wrapper for intake, summary, and vitals generation."""
 
     def generate_questions(self, illness_text: str, language: str) -> list[str]:
         """Generate follow-up intake questions from illness text."""
@@ -40,6 +40,20 @@ class OpenAIQuestionClient:
         if not isinstance(summary, dict):
             raise RuntimeError("Model did not return object")
         return summary
+
+    def generate_vitals_form(self, context: dict) -> dict:
+        """Generate context-aware vitals requirement form."""
+        template_path = Path(__file__).resolve().parent / "prompt_templates" / "vitals_prompt.txt"
+        template = template_path.read_text(encoding="utf-8")
+        prompt = template.replace("{{context_json}}", json.dumps(context, ensure_ascii=True))
+        content = self._chat_completion(
+            prompt=prompt,
+            system_role="You decide if vitals are needed and generate a safe structured vitals form.",
+        )
+        result = json.loads(content)
+        if not isinstance(result, dict):
+            raise RuntimeError("Model did not return object")
+        return result
 
     @staticmethod
     def _chat_completion(prompt: str, system_role: str) -> str:

@@ -7,6 +7,7 @@ from src.adapters.db.mongo.client import get_database
 from src.adapters.external.ai.openai_client import OpenAIQuestionClient
 from src.adapters.external.whatsapp.meta_whatsapp_client import MetaWhatsAppClient
 from src.application.use_cases.generate_pre_visit_summary import GeneratePreVisitSummaryUseCase
+from src.core.config import get_settings
 
 
 STOP_WORDS = {"stop", "enough", "exit", "quit", "band", "rok do", "bas"}
@@ -52,7 +53,22 @@ class IntakeChatService:
             },
             upsert=True,
         )
-        self.whatsapp.send_text(to_number, greeting + first_question)
+        settings = get_settings()
+        if settings.whatsapp_intake_template_name:
+            language_code = (
+                settings.whatsapp_intake_template_lang_hi
+                if language == "hi"
+                else settings.whatsapp_intake_template_lang_en
+            )
+            # Send first business-initiated message as approved template for better reliability.
+            self.whatsapp.send_template(
+                to_number=to_number,
+                template_name=settings.whatsapp_intake_template_name,
+                language_code=language_code,
+                body_values=[first_question],
+            )
+        else:
+            self.whatsapp.send_text(to_number, greeting + first_question)
 
     def handle_patient_reply(self, from_number: str, message_text: str) -> None:
         """Handle incoming WhatsApp reply and continue intake."""
