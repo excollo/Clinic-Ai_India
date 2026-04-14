@@ -1,2 +1,57 @@
-"""Workflow module."""
-# TODO: Implement this module.
+"""Workflow routes module."""
+from fastapi import APIRouter, HTTPException
+
+from src.adapters.db.mongo.client import get_database
+from src.api.schemas.vitals import LatestVitalsResponse, VitalsFormResponse
+from src.api.schemas.workflow import DoctorAppointmentViewResponse, PreVisitSummaryResponse
+from src.application.use_cases.generate_pre_visit_summary import GeneratePreVisitSummaryUseCase
+from src.application.use_cases.store_vitals import StoreVitalsUseCase
+
+router = APIRouter(prefix="/workflow", tags=["Workflow"])
+
+
+@router.post("/pre-visit-summary/{patient_id}", response_model=PreVisitSummaryResponse)
+def generate_pre_visit_summary(patient_id: str) -> PreVisitSummaryResponse:
+    """Generate pre-visit summary for latest intake session."""
+    try:
+        doc = GeneratePreVisitSummaryUseCase().execute(patient_id=patient_id)
+        return PreVisitSummaryResponse(**doc)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.get("/pre-visit-summary/{patient_id}", response_model=PreVisitSummaryResponse)
+def get_latest_pre_visit_summary(patient_id: str) -> PreVisitSummaryResponse:
+    """Fetch latest generated pre-visit summary by patient."""
+    db = get_database()
+    doc = db.pre_visit_summaries.find_one({"patient_id": patient_id}, sort=[("updated_at", -1)])
+    if not doc:
+        raise HTTPException(status_code=404, detail="Pre-visit summary not found")
+    doc.pop("_id", None)
+    return PreVisitSummaryResponse(**doc)
+
+
+@router.get("/doctor-appointment-view/{patient_id}", response_model=DoctorAppointmentViewResponse)
+def get_doctor_appointment_view(patient_id: str) -> DoctorAppointmentViewResponse:
+    """Provide doctor-ready appointment context with summary and vitals."""
+    db = get_database()
+    summary_doc = db.pre_visit_summaries.find_one({"patient_id": patient_id}, sort=[("updated_at", -1)])
+
+    summary_obj = None
+    if summary_doc:
+        summary_doc.pop("_id", None)
+        summary_obj = PreVisitSummaryResponse(**summary_doc)
+
+    vitals_use_case = StoreVitalsUseCase()
+    form_doc = vitals_use_case.get_latest_vitals_form(patient_id)
+    vitals_doc = vitals_use_case.get_latest_vitals(patient_id)
+
+    form_obj = VitalsFormResponse(**form_doc) if form_doc else None
+    vitals_obj = LatestVitalsResponse(**vitals_doc) if vitals_doc else None
+
+    return DoctorAppointmentViewResponse(
+        patient_id=patient_id,
+        pre_visit_summary=summary_obj,
+        latest_vitals_form=form_obj,
+        latest_vitals=vitals_obj,
+    )
