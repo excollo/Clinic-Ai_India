@@ -1,5 +1,6 @@
 """WhatsApp webhook routes module."""
 from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi.responses import PlainTextResponse
 
 from src.application.services.intake_chat_service import IntakeChatService
 from src.core.config import get_settings
@@ -12,11 +13,11 @@ def verify_webhook(
     hub_mode: str = Query(alias="hub.mode"),
     hub_verify_token: str = Query(alias="hub.verify_token"),
     hub_challenge: str = Query(alias="hub.challenge"),
-) -> str:
+) -> PlainTextResponse:
     """Verify WhatsApp webhook endpoint."""
     settings = get_settings()
     if hub_mode == "subscribe" and hub_verify_token == settings.whatsapp_verify_token:
-        return hub_challenge
+        return PlainTextResponse(content=hub_challenge)
     raise HTTPException(status_code=403, detail="Webhook verification failed")
 
 
