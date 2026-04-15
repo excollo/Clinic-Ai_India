@@ -65,7 +65,7 @@ class IntakeChatService:
                 to_number=to_number,
                 template_name=settings.whatsapp_intake_template_name,
                 language_code=language_code,
-                body_values=[first_question],
+                body_values=[],
             )
         else:
             self.whatsapp.send_text(to_number, greeting + first_question)
