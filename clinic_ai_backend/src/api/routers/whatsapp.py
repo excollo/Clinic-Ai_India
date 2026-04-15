@@ -1,13 +1,17 @@
 """WhatsApp webhook routes module."""
+import logging
+
 from fastapi import APIRouter, HTTPException, Query, Request, Response
 
 from src.application.services.intake_chat_service import IntakeChatService
 from src.core.config import get_settings
 
 router = APIRouter(prefix="/webhooks/whatsapp", tags=["Workflow"])
+logger = logging.getLogger(__name__)
 
 
 @router.get("")
+@router.get("/")
 def verify_webhook(
     hub_mode: str = Query(alias="hub.mode"),
     hub_verify_token: str = Query(alias="hub.verify_token"),
@@ -21,11 +25,13 @@ def verify_webhook(
 
 
 @router.post("")
+@router.post("/")
 async def receive_webhook(request: Request) -> dict:
     """Receive incoming WhatsApp messages and continue intake flow."""
     body = await request.json()
     entries = body.get("entry", [])
     service = IntakeChatService()
+    logger.info("WhatsApp webhook received entries=%s", len(entries))
 
     for entry in entries:
         for change in entry.get("changes", []):
@@ -33,6 +39,12 @@ async def receive_webhook(request: Request) -> dict:
             for message in value.get("messages", []):
                 from_number = message.get("from")
                 text = _extract_message_text(message)
+                logger.info(
+                    "WhatsApp inbound message from=%s type=%s text_present=%s",
+                    from_number,
+                    message.get("type"),
+                    bool(text),
+                )
                 if from_number and text:
                     service.handle_patient_reply(from_number=from_number, message_text=text)
 
