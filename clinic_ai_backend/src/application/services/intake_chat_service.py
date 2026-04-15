@@ -11,6 +11,17 @@ from src.core.config import get_settings
 
 
 STOP_WORDS = {"stop", "enough", "exit", "quit", "band", "rok do", "bas"}
+GREETING_WORDS = {
+    "hi",
+    "hii",
+    "hiii",
+    "hello",
+    "hey",
+    "namaste",
+    "namaskar",
+    "good morning",
+    "good evening",
+}
 
 
 class IntakeChatService:
@@ -29,11 +40,7 @@ class IntakeChatService:
             if language == "en"
             else "Namaste! Clinic AI India mein aapka swagat hai. "
         )
-        first_question = (
-            "Please describe your main health problem in a few words."
-            if language == "en"
-            else "Kripya apni mukhya swasthya samasya kuch shabdon mein batayen."
-        )
+        first_question = self._chief_complaint_question(language)
 
         self.db.intake_sessions.update_one(
             {"patient_id": patient_id},
@@ -99,6 +106,12 @@ class IntakeChatService:
 
         status = session.get("status")
         if status == "awaiting_illness":
+            if self._looks_like_greeting(cleaned):
+                self.whatsapp.send_text(
+                    session["to_number"],
+                    self._chief_complaint_question(session.get("language", "en")),
+                )
+                return
             self._save_illness_and_generate_questions(session, cleaned)
             return
 
@@ -197,3 +210,18 @@ class IntakeChatService:
     def _normalize_phone_number(phone_number: str) -> str:
         """Normalize phone number for reliable matching across webhook/provider formats."""
         return "".join(ch for ch in str(phone_number or "") if ch.isdigit())
+
+    @staticmethod
+    def _chief_complaint_question(language: str) -> str:
+        """Return the question that asks for patient's primary problem."""
+        return (
+            "Please describe your main health problem in a few words."
+            if language == "en"
+            else "Kripya apni mukhya swasthya samasya kuch shabdon mein batayen."
+        )
+
+    @staticmethod
+    def _looks_like_greeting(message_text: str) -> bool:
+        """Detect greeting-only replies that should not be treated as illness."""
+        normalized = " ".join((message_text or "").strip().lower().split())
+        return normalized in GREETING_WORDS
