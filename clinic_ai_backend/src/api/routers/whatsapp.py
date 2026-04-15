@@ -32,8 +32,30 @@ async def receive_webhook(request: Request) -> dict:
             value = change.get("value", {})
             for message in value.get("messages", []):
                 from_number = message.get("from")
-                text = (message.get("text") or {}).get("body", "")
+                text = _extract_message_text(message)
                 if from_number and text:
                     service.handle_patient_reply(from_number=from_number, message_text=text)
 
     return {"received": True}
+
+
+def _extract_message_text(message: dict) -> str:
+    """Extract user-entered text across common WhatsApp message types."""
+    text_body = (message.get("text") or {}).get("body")
+    if isinstance(text_body, str) and text_body.strip():
+        return text_body.strip()
+
+    button_text = (message.get("button") or {}).get("text")
+    if isinstance(button_text, str) and button_text.strip():
+        return button_text.strip()
+
+    interactive = message.get("interactive") or {}
+    interactive_button = (interactive.get("button_reply") or {}).get("title")
+    if isinstance(interactive_button, str) and interactive_button.strip():
+        return interactive_button.strip()
+
+    interactive_list = (interactive.get("list_reply") or {}).get("title")
+    if isinstance(interactive_list, str) and interactive_list.strip():
+        return interactive_list.strip()
+
+    return ""

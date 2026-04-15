@@ -61,12 +61,13 @@ class IntakeChatService:
                 if language == "hi"
                 else settings.whatsapp_intake_template_lang_en
             )
+            body_values = [first_question] if settings.whatsapp_intake_template_param_count > 0 else []
             # Send first business-initiated message as approved template for better reliability.
             self.whatsapp.send_template(
                 to_number=normalized_to_number,
                 template_name=settings.whatsapp_intake_template_name,
                 language_code=language_code,
-                body_values=[first_question],
+                body_values=body_values,
             )
         else:
             self.whatsapp.send_text(normalized_to_number, greeting + first_question)
