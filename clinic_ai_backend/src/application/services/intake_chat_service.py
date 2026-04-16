@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from difflib import SequenceMatcher
 
 from src.adapters.db.mongo.client import get_database
 from src.adapters.external.ai.openai_client import OpenAIQuestionClient
@@ -57,6 +58,8 @@ class IntakeChatService:
                     "pending_topic": None,
                     "question_number": 1,
                     "max_questions": 8,
+                    "processed_message_ids": [],
+                    "last_outbound_at": None,
                     "updated_at": datetime.now(timezone.utc),
                 },
                 "$setOnInsert": {"created_at": datetime.now(timezone.utc)},
@@ -81,7 +84,7 @@ class IntakeChatService:
         else:
             self.whatsapp.send_text(normalized_to_number, greeting + first_question)
 
-    def handle_patient_reply(self, from_number: str, message_text: str) -> None:
+    def handle_patient_reply(self, from_number: str, message_text: str, message_id: str | None = None) -> None:
         """Handle incoming WhatsApp reply and continue intake."""
         normalized_from = self._normalize_phone_number(from_number)
         session = self.db.intake_sessions.find_one(
@@ -101,6 +104,9 @@ class IntakeChatService:
                 sort=[("updated_at", -1)],
             )
         if not session:
+            return
+
+        if message_id and not self._claim_message(session["_id"], message_id):
             return
 
         cleaned = (message_text or "").strip()
@@ -130,11 +136,14 @@ class IntakeChatService:
             return
 
         if status == "in_progress":
+            if self._should_treat_as_illness_correction(session, cleaned):
+                self._replace_illness_and_regenerate(session, cleaned)
+                return
             self._save_answer_and_ask_next(session, cleaned)
 
     def _save_illness_and_generate_questions(self, session: dict, illness_text: str) -> None:
-        self.db.intake_sessions.update_one(
-            {"_id": session["_id"]},
+        claimed = self.db.intake_sessions.find_one_and_update(
+            {"_id": session["_id"], "status": "awaiting_illness"},
             {
                 "$set": {
                     "illness": illness_text,
@@ -144,16 +153,21 @@ class IntakeChatService:
                 "$push": {"answers": {"question": "illness", "answer": illness_text}},
             },
         )
-        refreshed = self.db.intake_sessions.find_one({"_id": session["_id"]}) or session
+        if not claimed:
+            return
+        refreshed = self.db.intake_sessions.find_one({"_id": session["_id"]}) or claimed
         self._generate_and_send_next_turn(refreshed)
 
     def _save_answer_and_ask_next(self, session: dict, answer_text: str) -> None:
         current_question = str(session.get("pending_question", "") or "").strip()
         if not current_question:
-            self._generate_and_send_next_turn(session)
             return
-        self.db.intake_sessions.update_one(
-            {"_id": session["_id"]},
+        claimed = self.db.intake_sessions.find_one_and_update(
+            {
+                "_id": session["_id"],
+                "status": "in_progress",
+                "pending_question": current_question,
+            },
             {
                 "$push": {
                     "answers": {
@@ -168,6 +182,35 @@ class IntakeChatService:
                     "status": "in_progress",
                     "updated_at": datetime.now(timezone.utc),
                 },
+            },
+        )
+        if not claimed:
+            return
+        refreshed = self.db.intake_sessions.find_one({"_id": session["_id"]}) or claimed
+        self._generate_and_send_next_turn(refreshed)
+
+    def _replace_illness_and_regenerate(self, session: dict, illness_text: str) -> None:
+        answers = list(session.get("answers", []))
+        replaced = False
+        for answer in answers:
+            if answer.get("question") == "illness":
+                answer["answer"] = illness_text
+                replaced = True
+                break
+        if not replaced:
+            answers.insert(0, {"question": "illness", "answer": illness_text})
+
+        self.db.intake_sessions.update_one(
+            {"_id": session["_id"]},
+            {
+                "$set": {
+                    "illness": illness_text,
+                    "answers": answers,
+                    "pending_question": None,
+                    "pending_topic": None,
+                    "question_number": 1,
+                    "updated_at": datetime.now(timezone.utc),
+                }
             },
         )
         refreshed = self.db.intake_sessions.find_one({"_id": session["_id"]}) or session
@@ -206,6 +249,7 @@ class IntakeChatService:
                             "pending_question": None,
                             "pending_topic": topic,
                             "question_number": question_number,
+                            "last_outbound_at": datetime.now(timezone.utc).isoformat(),
                             "updated_at": datetime.now(timezone.utc),
                         }
                     },
@@ -222,6 +266,7 @@ class IntakeChatService:
                         "pending_question": message,
                         "pending_topic": topic,
                         "question_number": max(question_number + 1, int(session.get("question_number", 1) or 1) + 1),
+                        "last_outbound_at": datetime.now(timezone.utc).isoformat(),
                         "updated_at": datetime.now(timezone.utc),
                     }
                 },
@@ -239,11 +284,62 @@ class IntakeChatService:
                     "status": "in_progress",
                     "pending_question": fallback_question,
                     "pending_topic": "associated_symptoms",
+                    "last_outbound_at": datetime.now(timezone.utc).isoformat(),
                     "updated_at": datetime.now(timezone.utc),
                 }
             },
         )
         self.whatsapp.send_text(session["to_number"], fallback_question)
+
+    def _claim_message(self, session_id: object, message_id: str) -> bool:
+        result = self.db.intake_sessions.update_one(
+            {"_id": session_id, "processed_message_ids": {"$ne": message_id}},
+            {"$push": {"processed_message_ids": message_id}},
+        )
+        return result.modified_count == 1
+
+    def _should_treat_as_illness_correction(self, session: dict, message_text: str) -> bool:
+        illness = str(session.get("illness", "") or "").strip()
+        pending_question = str(session.get("pending_question", "") or "").strip()
+        if not illness or not pending_question:
+            return False
+
+        follow_up_answers = [a for a in session.get("answers", []) if a.get("question") != "illness"]
+        if follow_up_answers:
+            return False
+
+        last_outbound_at = self._parse_datetime(session.get("last_outbound_at"))
+        if not last_outbound_at:
+            return False
+
+        seconds_since_question = (datetime.now(timezone.utc) - last_outbound_at).total_seconds()
+        if seconds_since_question > 15:
+            return False
+
+        normalized_new = self._normalize_for_similarity(message_text)
+        normalized_old = self._normalize_for_similarity(illness)
+        if not normalized_new or not normalized_old:
+            return False
+
+        if normalized_new == normalized_old:
+            return True
+
+        similarity = SequenceMatcher(a=normalized_new, b=normalized_old).ratio()
+        return similarity >= 0.6
+
+    @staticmethod
+    def _normalize_for_similarity(text: str) -> str:
+        return "".join(ch.lower() for ch in str(text or "") if ch.isalnum())
+
+    @staticmethod
+    def _parse_datetime(value: str | None) -> datetime | None:
+        if not value:
+            return None
+        try:
+            parsed = datetime.fromisoformat(value)
+            return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+        except ValueError:
+            return None
 
     @staticmethod
     def _fallback_questions(language: str) -> list[str]:

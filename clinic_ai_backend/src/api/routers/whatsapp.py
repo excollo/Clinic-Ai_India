@@ -36,15 +36,21 @@ async def receive_webhook(request: Request) -> dict:
             value = change.get("value", {})
             for message in value.get("messages", []):
                 from_number = message.get("from")
+                message_id = message.get("id")
                 text = _extract_message_text(message)
                 logger.info(
-                    "WhatsApp inbound message from=%s type=%s text_present=%s",
+                    "WhatsApp inbound message id=%s from=%s type=%s text_present=%s",
+                    message_id,
                     from_number,
                     message.get("type"),
                     bool(text),
                 )
                 if from_number and text:
-                    service.handle_patient_reply(from_number=from_number, message_text=text)
+                    service.handle_patient_reply(
+                        from_number=from_number,
+                        message_text=text,
+                        message_id=message_id,
+                    )
 
     return {"received": True}
 
