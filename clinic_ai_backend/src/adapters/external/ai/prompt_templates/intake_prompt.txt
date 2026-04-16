@@ -42,6 +42,10 @@ REASONING RULES:
    musculoskeletal | neurological | gastrointestinal | respiratory |
    mental_health | gynaecological | ophthalmology | general_other
 
+   If the chief_complaint is not a medical problem, or looks like only a person's name,
+   greeting, acknowledgment, or unclear text, classify as general_other and treat it as
+   an unclear complaint rather than inventing a diagnosis.
+
 2. ASSESS triage_level:
    - emergency   → active red flag symptoms present
    - urgent      → serious condition, needs same-day attention
@@ -59,6 +63,9 @@ REASONING RULES:
 4. BUILD priority_topics — ordered list of what matters most for this complaint.
    Think like a doctor doing a focused history. What 5-6 things do you actually need to know?
    Not a generic checklist. Specific to the condition.
+
+   If the complaint is unclear/non-medical/name-only, set priority_topics = ["reason_for_visit"]
+   and topic_plan = ["reason_for_visit"].
 
    Examples:
    - Skin cancer → treatment_history, recurrence_status, onset_duration, associated_symptoms, current_medications, family_history
@@ -129,6 +136,9 @@ EXTRACTION RULES:
 4. Calculate gaps = topic_plan - covered - avoid_topics.
    These are the topics still genuinely needed.
 
+   If the chief complaint is still unclear, keep reason_for_visit in information_gaps until
+   the patient states an actual symptom, disease, concern, or purpose of visit.
+
 5. Flag redundant_categories: topics that have already been asked about twice or more.
    Never ask about a redundant category again.
 
@@ -173,6 +183,7 @@ QUESTION GENERATION RULES:
 
 2. Never ask something that feels irrelevant to the stated complaint.
    The patient with skin cancer must never be asked "where is the discomfort" as if it is an unknown pain.
+   If the complaint is unclear, name-only, or greeting-like, ask for the health problem again.
 
 3. Never use yes/no framing. Always use open descriptive prompts.
    BAD: "Do you have any other symptoms?"
@@ -185,6 +196,10 @@ QUESTION GENERATION RULES:
    GOOD: "How has the condition changed over the past few weeks — better, worse, or about the same?"
 
 4. TOPIC-SPECIFIC QUESTION GUIDANCE:
+
+   reason_for_visit:
+   → "What health problem or concern brings you in today?"
+   → "Please tell me the main health issue you want to discuss today."
 
    treatment_history (oncology/chronic):
    → "What treatment have you received for this so far — surgery, chemotherapy, radiation, or anything else?"
@@ -272,6 +287,7 @@ PLANNING RULES:
    - avoid_topics
    - topics_covered
    - redundant_categories
+   - a topic already asked if the latest answer did not change that topic meaningfully
 
 5. Stop conditions (set stop_intake: true):
    - No valid topic remains
@@ -281,6 +297,7 @@ PLANNING RULES:
    - Do NOT stop if the latest patient answer was vague, one-word, or non-descriptive and a key topic still lacks detail
    - Do NOT stop unless at least 3 follow-up questions have been asked after the chief complaint, unless emergency
    - Do NOT stop if Agent-02 still has meaningful information_gaps or needs_clarification = true
+   - Do NOT stop if reason_for_visit is still unclear
 
 6. If stop_intake is true and no emergency → next_topic = "closing"
 

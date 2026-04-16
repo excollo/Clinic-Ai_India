@@ -24,14 +24,9 @@ class IntakeChatService:
         self.openai = OpenAIQuestionClient()
 
     def start_intake(self, patient_id: str, to_number: str, language: str) -> None:
-        """Start intake with one-time greeting and first illness question."""
+        """Start intake with opening message; first clinical question comes after user reply."""
         normalized_to_number = self._normalize_phone_number(to_number)
-        greeting = (
-            "Hello! Welcome to Clinic AI India. "
-            if language == "en"
-            else "Namaste! Clinic AI India mein aapka swagat hai. "
-        )
-        first_question = self._chief_complaint_question(language)
+        opening_message = self._opening_message(language)
 
         self.db.intake_sessions.update_one(
             {"patient_id": patient_id},
@@ -40,7 +35,7 @@ class IntakeChatService:
                     "patient_id": patient_id,
                     "to_number": normalized_to_number,
                     "language": language,
-                    "status": "awaiting_illness",
+                    "status": "awaiting_conversation_start",
                     "greeting_sent": True,
                     "illness": None,
                     "answers": [],
@@ -65,8 +60,8 @@ class IntakeChatService:
                 if language == "hi"
                 else settings.whatsapp_intake_template_lang_en
             )
-            body_values = [first_question] if settings.whatsapp_intake_template_param_count > 0 else []
-            # Send first business-initiated message as approved template for better reliability.
+            body_values = [opening_message] if settings.whatsapp_intake_template_param_count > 0 else []
+            # Send first business-initiated template to open the WhatsApp conversation window.
             self.whatsapp.send_template(
                 to_number=normalized_to_number,
                 template_name=settings.whatsapp_intake_template_name,
@@ -74,7 +69,7 @@ class IntakeChatService:
                 body_values=body_values,
             )
         else:
-            self.whatsapp.send_text(normalized_to_number, greeting + first_question)
+            self.whatsapp.send_text(normalized_to_number, opening_message)
 
     def handle_patient_reply(self, from_number: str, message_text: str, message_id: str | None = None) -> None:
         """Handle incoming WhatsApp reply and continue intake."""
@@ -82,7 +77,7 @@ class IntakeChatService:
         session = self.db.intake_sessions.find_one(
             {
                 "to_number": normalized_from,
-                "status": {"$in": ["awaiting_illness", "in_progress"]},
+                "status": {"$in": ["awaiting_conversation_start", "awaiting_illness", "in_progress"]},
             },
             sort=[("updated_at", -1)],
         )
@@ -91,7 +86,7 @@ class IntakeChatService:
             session = self.db.intake_sessions.find_one(
                 {
                     "to_number": f"+{normalized_from}",
-                    "status": {"$in": ["awaiting_illness", "in_progress"]},
+                    "status": {"$in": ["awaiting_conversation_start", "awaiting_illness", "in_progress"]},
                 },
                 sort=[("updated_at", -1)],
             )
@@ -122,6 +117,22 @@ class IntakeChatService:
             return
 
         status = session.get("status")
+        if status == "awaiting_conversation_start":
+            self.db.intake_sessions.update_one(
+                {"_id": session["_id"], "status": "awaiting_conversation_start"},
+                {
+                    "$set": {
+                        "status": "awaiting_illness",
+                        "updated_at": datetime.now(timezone.utc),
+                    }
+                },
+            )
+            self.whatsapp.send_text(
+                session["to_number"],
+                self._chief_complaint_question(session.get("language", "en")),
+            )
+            return
+
         if status == "awaiting_illness":
             self._save_illness_and_generate_questions(session, cleaned)
             return
@@ -446,6 +457,40 @@ class IntakeChatService:
             return False
         return (datetime.now(timezone.utc) - recent_at).total_seconds() <= 12
 
+    def _should_reask_chief_complaint(self, message_text: str, patient: dict) -> bool:
+        normalized = self._normalize_for_similarity(message_text)
+        if not normalized:
+            return True
+
+        patient_name = self._normalize_for_similarity(patient.get("name", ""))
+        if patient_name and (normalized == patient_name or normalized in patient_name or patient_name in normalized):
+            return True
+
+        intro_phrases = {
+            "hi",
+            "hii",
+            "hiii",
+            "hello",
+            "hey",
+            "namaste",
+            "namaskar",
+            "goodmorning",
+            "goodevening",
+            "acha",
+            "ok",
+            "okay",
+            "yes",
+            "no",
+        }
+        if normalized in intro_phrases:
+            return True
+
+        token_count = len(str(message_text or "").split())
+        if token_count <= 2 and normalized.isalpha() and len(normalized) <= 3:
+            return True
+
+        return False
+
     def _remember_inbound_text(self, session_id: object, message_text: str) -> None:
         self.db.intake_sessions.update_one(
             {"_id": session_id},
@@ -535,4 +580,13 @@ class IntakeChatService:
             "Please describe your main health problem in a few words."
             if language == "en"
             else "Kripya apni mukhya swasthya samasya kuch shabdon mein batayen."
+        )
+
+    @staticmethod
+    def _opening_message(language: str) -> str:
+        """Return the initial opening message before intake begins."""
+        return (
+            "Hello! Please reply with any message to begin your intake."
+            if language == "en"
+            else "Namaste! Apna intake shuru karne ke liye koi bhi message bhejiye."
         )
