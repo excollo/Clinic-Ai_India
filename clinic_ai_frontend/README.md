@@ -1,3 +1,3 @@
-# Clinic AI India Frontend
+# Clinic Frontend
 
 TODO: Add frontend setup and architecture notes.
