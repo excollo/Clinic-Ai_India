@@ -52,9 +52,11 @@ class IntakeChatService:
                     "status": "awaiting_illness",
                     "greeting_sent": True,
                     "illness": None,
-                    "questions": [],
-                    "current_index": 0,
                     "answers": [],
+                    "pending_question": None,
+                    "pending_topic": None,
+                    "question_number": 1,
+                    "max_questions": 8,
                     "updated_at": datetime.now(timezone.utc),
                 },
                 "$setOnInsert": {"created_at": datetime.now(timezone.utc)},
@@ -131,63 +133,117 @@ class IntakeChatService:
             self._save_answer_and_ask_next(session, cleaned)
 
     def _save_illness_and_generate_questions(self, session: dict, illness_text: str) -> None:
-        language = session.get("language", "en")
-        questions = self._fallback_questions(language)
-        try:
-            ai_questions = self.openai.generate_questions(illness_text, language)
-            if ai_questions:
-                questions = ai_questions
-        except Exception:
-            pass
-
         self.db.intake_sessions.update_one(
             {"_id": session["_id"]},
             {
                 "$set": {
                     "illness": illness_text,
-                    "questions": questions,
                     "status": "in_progress",
-                    "current_index": 0,
                     "updated_at": datetime.now(timezone.utc),
                 },
                 "$push": {"answers": {"question": "illness", "answer": illness_text}},
             },
         )
-        self.whatsapp.send_text(session["to_number"], questions[0])
+        refreshed = self.db.intake_sessions.find_one({"_id": session["_id"]}) or session
+        self._generate_and_send_next_turn(refreshed)
 
     def _save_answer_and_ask_next(self, session: dict, answer_text: str) -> None:
-        idx = int(session.get("current_index", 0))
-        questions = session.get("questions", [])
-        if idx >= len(questions):
+        current_question = str(session.get("pending_question", "") or "").strip()
+        if not current_question:
+            self._generate_and_send_next_turn(session)
             return
-
-        current_question = questions[idx]
-        new_idx = idx + 1
-        next_status = "completed" if new_idx >= len(questions) else "in_progress"
-
         self.db.intake_sessions.update_one(
             {"_id": session["_id"]},
             {
-                "$push": {"answers": {"question": current_question, "answer": answer_text}},
+                "$push": {
+                    "answers": {
+                        "question": current_question,
+                        "topic": session.get("pending_topic"),
+                        "answer": answer_text,
+                    }
+                },
                 "$set": {
-                    "current_index": new_idx,
-                    "status": next_status,
+                    "pending_question": None,
+                    "pending_topic": None,
+                    "status": "in_progress",
                     "updated_at": datetime.now(timezone.utc),
                 },
             },
         )
+        refreshed = self.db.intake_sessions.find_one({"_id": session["_id"]}) or session
+        self._generate_and_send_next_turn(refreshed)
 
-        if next_status == "completed":
-            done_msg = (
-                "Thank you. Your intake is complete."
-                if session.get("language") == "en"
-                else "Dhanyavaad. Aapka intake poora ho gaya hai."
+    def _generate_and_send_next_turn(self, session: dict) -> None:
+        language = session.get("language", "en")
+        fallback_question = self._fallback_questions(language)[0]
+        try:
+            patient = self.db.patients.find_one({"patient_id": session.get("patient_id")}) or {}
+            context = {
+                "patient_name": patient.get("name", ""),
+                "patient_age": patient.get("age", ""),
+                "gender": patient.get("gender", ""),
+                "language": language,
+                "question_number": int(session.get("question_number", 1) or 1),
+                "max_questions": int(session.get("max_questions", 8) or 8),
+                "previous_qa_json": session.get("answers", []),
+                "has_travelled_recently": bool(patient.get("travelled_recently", False)),
+                "chief_complaint": session.get("illness", ""),
+            }
+            ai_turn = self.openai.generate_intake_turn(context)
+            message = str(ai_turn.get("message", "") or "").strip()
+            if not message:
+                raise RuntimeError("Empty message in AI turn")
+            is_complete = bool(ai_turn.get("is_complete", False))
+            topic = str(ai_turn.get("topic", "") or "")
+            question_number = int(ai_turn.get("question_number", session.get("question_number", 1)) or 1)
+
+            if is_complete:
+                self.db.intake_sessions.update_one(
+                    {"_id": session["_id"]},
+                    {
+                        "$set": {
+                            "status": "completed",
+                            "pending_question": None,
+                            "pending_topic": topic,
+                            "question_number": question_number,
+                            "updated_at": datetime.now(timezone.utc),
+                        }
+                    },
+                )
+                self.whatsapp.send_text(session["to_number"], message)
+                self._auto_generate_pre_visit_summary(session)
+                return
+
+            self.db.intake_sessions.update_one(
+                {"_id": session["_id"]},
+                {
+                    "$set": {
+                        "status": "in_progress",
+                        "pending_question": message,
+                        "pending_topic": topic,
+                        "question_number": max(question_number + 1, int(session.get("question_number", 1) or 1) + 1),
+                        "updated_at": datetime.now(timezone.utc),
+                    }
+                },
             )
-            self.whatsapp.send_text(session["to_number"], done_msg)
-            self._auto_generate_pre_visit_summary(session)
+            self.whatsapp.send_text(session["to_number"], message)
             return
+        except Exception:
+            pass
 
-        self.whatsapp.send_text(session["to_number"], questions[new_idx])
+        # Safe fallback if model call/parsing fails.
+        self.db.intake_sessions.update_one(
+            {"_id": session["_id"]},
+            {
+                "$set": {
+                    "status": "in_progress",
+                    "pending_question": fallback_question,
+                    "pending_topic": "associated_symptoms",
+                    "updated_at": datetime.now(timezone.utc),
+                }
+            },
+        )
+        self.whatsapp.send_text(session["to_number"], fallback_question)
 
     @staticmethod
     def _fallback_questions(language: str) -> list[str]:

@@ -11,19 +11,36 @@ from src.core.config import get_settings
 class OpenAIQuestionClient:
     """Simple OpenAI wrapper for intake, summary, and vitals generation."""
 
-    def generate_questions(self, illness_text: str, language: str) -> list[str]:
-        """Generate follow-up intake questions from illness text."""
-        prompt = (
-            "Generate 5 short clinical intake follow-up questions as a JSON array of strings. "
-            f"Language: {'Hindi' if language == 'hi' else 'English'}. "
-            "Do not include greeting. Keep each question under 20 words. "
-            f"Patient illness description: {illness_text}"
+    def generate_intake_turn(self, context: dict) -> dict:
+        """Generate one intake turn from the dynamic intake template."""
+        template_path = Path(__file__).resolve().parent / "prompt_templates" / "intake_prompt.txt"
+        template = template_path.read_text(encoding="utf-8")
+        replacements = {
+            "{{patient_name}}": str(context.get("patient_name", "") or ""),
+            "{{patient_age}}": str(context.get("patient_age", "") or ""),
+            "{{gender}}": str(context.get("gender", "") or ""),
+            "{{language}}": str(context.get("language", "en") or "en"),
+            "{{question_number}}": str(int(context.get("question_number", 0) or 0)),
+            "{{max_questions}}": str(int(context.get("max_questions", 8) or 8)),
+            "{{previous_qa_json}}": json.dumps(context.get("previous_qa_json", []), ensure_ascii=True),
+            "{{has_travelled_recently}}": "true" if bool(context.get("has_travelled_recently", False)) else "false",
+            "{{chief_complaint}}": str(context.get("chief_complaint", "") or ""),
+        }
+        prompt = template
+        for placeholder, value in replacements.items():
+            prompt = prompt.replace(placeholder, value)
+
+        content = self._chat_completion(
+            prompt=prompt,
+            system_role=(
+                "You are an expert clinical intake orchestration engine. "
+                "Follow the provided instructions exactly and return strict JSON only."
+            ),
         )
-        content = self._chat_completion(prompt=prompt, system_role="You are a medical intake assistant.")
-        questions = json.loads(content)
-        if not isinstance(questions, list):
-            raise RuntimeError("Model did not return list")
-        return [str(q).strip() for q in questions if str(q).strip()][:5]
+        result = json.loads(content)
+        if not isinstance(result, dict):
+            raise RuntimeError("Model did not return object")
+        return result
 
     def generate_pre_visit_summary(self, language: str, intake_answers: list[dict]) -> dict:
         """Generate a structured five-section pre-visit summary."""
