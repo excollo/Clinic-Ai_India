@@ -3,11 +3,14 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
+import tempfile
 from typing import Any
 from urllib.request import Request, urlopen
 
 from src.adapters.db.mongo.client import get_database
 from src.adapters.db.mongo.repositories.audio_repository import AudioRepository
+from src.adapters.external.storage.object_storage import AzureBlobStorage
 from src.adapters.external.queue.consumer import TranscriptionQueueConsumer
 from src.adapters.external.queue.producer import TranscriptionQueueProducer
 from src.core.config import get_settings
@@ -61,10 +64,12 @@ class TranscriptionWorker:
 
         self.repo.mark_processing(job_id)
         try:
-            if self.settings.use_local_adapters:
-                speech_response = await asyncio.to_thread(self._call_whisper_local, audio_doc=audio_doc)
-            else:
+            blob_url = str(audio_doc.get("blob_url", "") or "")
+            can_use_azure_speech = bool(self.settings.azure_speech_key) and blob_url.startswith("http")
+            if can_use_azure_speech:
                 speech_response = await asyncio.to_thread(self._call_azure_speech, job=job, audio_doc=audio_doc)
+            else:
+                speech_response = await asyncio.to_thread(self._call_whisper_local, audio_doc=audio_doc)
 
             normalized = self._normalize_segments(speech_response.get("segments", []))
             if not normalized:
@@ -147,7 +152,22 @@ class TranscriptionWorker:
         except ImportError as exc:
             raise RuntimeError("openai-whisper is not installed") from exc
         model = whisper.load_model(self.settings.whisper_model_size)
-        result = model.transcribe(audio_doc["blob_path"])
+        blob_path = str(audio_doc.get("blob_path", "") or "")
+        audio_path = blob_path
+        temp_path: str | None = None
+        if blob_path.startswith("gridfs://"):
+            audio_bytes = AzureBlobStorage().download_audio(blob_path)
+            suffix = self._suffix_from_mime(str(audio_doc.get("mime_type", "") or ""))
+            with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+                tmp.write(audio_bytes)
+                temp_path = tmp.name
+            audio_path = temp_path
+        result = model.transcribe(audio_path)
+        if temp_path and os.path.exists(temp_path):
+            try:
+                os.remove(temp_path)
+            except OSError:
+                pass
         segments = []
         for raw in result.get("segments", []):
             segments.append(
@@ -161,6 +181,19 @@ class TranscriptionWorker:
                 }
             )
         return {"language_detected": result.get("language", "unknown"), "segments": segments}
+
+    @staticmethod
+    def _suffix_from_mime(mime_type: str) -> str:
+        mime = mime_type.lower().strip()
+        if "wav" in mime:
+            return ".wav"
+        if "mpeg" in mime or "mp3" in mime:
+            return ".mp3"
+        if "mp4" in mime or "m4a" in mime:
+            return ".m4a"
+        if "webm" in mime:
+            return ".webm"
+        return ".audio"
 
     def _normalize_segments(self, segments: list[dict[str, Any]]) -> list[dict]:
         normalized: list[dict] = []

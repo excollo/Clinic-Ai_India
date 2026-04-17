@@ -61,8 +61,8 @@ async def upload_transcription_audio(
         audio_bytes=payload,
         mime_type=audio_file.content_type or "application/octet-stream",
     )
-    stored_blob_path = storage_ref if settings.use_local_adapters else blob_path
-    stored_blob_url = storage_ref if not settings.use_local_adapters else f"file://{storage_ref}"
+    stored_blob_path = storage_ref
+    stored_blob_url = storage_ref
 
     repo = AudioRepository()
     repo.create_audio_file(
@@ -71,7 +71,7 @@ async def upload_transcription_audio(
         visit_id=visit_id,
         blob_url=stored_blob_url,
         blob_path=stored_blob_path,
-        container=settings.azure_blob_container_audio,
+        container=settings.mongo_audio_bucket_name,
         mime_type=audio_file.content_type or "application/octet-stream",
         size_bytes=len(payload),
         sha256=digest,
