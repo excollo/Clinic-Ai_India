@@ -1,12 +1,24 @@
 """FastAPI application factory module."""
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from src.api.routers import health, notes, patients, transcription, vitals, whatsapp, workflow
+from src.workers.transcription_worker import start_background_workers, stop_background_workers
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    """Start/stop background transcription workers with app lifecycle."""
+    start_background_workers()
+    try:
+        yield
+    finally:
+        await stop_background_workers()
 
 
 def create_app() -> FastAPI:
     """Create and configure FastAPI application."""
-    app = FastAPI(title="Clinic AI India Backend", version="0.1.0")
+    app = FastAPI(title="Clinic AI India Backend", version="0.1.0", lifespan=lifespan)
     app.include_router(health.router)
     app.include_router(patients.router)
     app.include_router(vitals.router)
