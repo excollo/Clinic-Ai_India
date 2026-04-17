@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import json
 from typing import Any
+from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 from src.adapters.db.mongo.client import get_database
@@ -153,19 +154,46 @@ class TranscriptionWorker:
     def _call_azure_speech(self, *, job: dict, audio_doc: dict) -> dict:
         if not self.settings.azure_speech_key:
             raise RuntimeError("AZURE_SPEECH_KEY is not configured")
-        locale = self._language_hint_to_locale(str(job.get("language_mix", "") or "en"))
-        endpoint = self._resolve_azure_speech_endpoint(locale)
+        primary_locale = self._language_hint_to_locale(str(job.get("language_mix", "") or "en"))
         storage_ref = str(audio_doc.get("blob_url", "") or audio_doc.get("blob_path", "") or "")
         if not storage_ref:
             raise RuntimeError("Audio storage reference not found")
         audio_bytes = AzureBlobStorage().download_audio(storage_ref)
-        req = Request(endpoint, data=audio_bytes, method="POST")
-        req.add_header("Ocp-Apim-Subscription-Key", self.settings.azure_speech_key)
-        req.add_header("Accept", "application/json;text/xml")
-        req.add_header("Content-Type", str(audio_doc.get("mime_type", "") or "audio/wav"))
-        with urlopen(req, timeout=self.settings.transcription_timeout_sec) as response:
-            raw = json.loads(response.read().decode("utf-8"))
-        return self._normalize_azure_response(raw, locale)
+        content_type = self._normalize_audio_content_type(str(audio_doc.get("mime_type", "") or "audio/wav"))
+        last_404: HTTPError | None = None
+        last_raw: dict | None = None
+
+        for locale in self._candidate_locales(primary_locale):
+            for endpoint in self._candidate_azure_speech_endpoints(locale):
+                try:
+                    req = Request(endpoint, data=audio_bytes, method="POST")
+                    req.add_header("Ocp-Apim-Subscription-Key", self.settings.azure_speech_key)
+                    req.add_header("Accept", "application/json;text/xml")
+                    req.add_header("Content-Type", content_type)
+                    with urlopen(req, timeout=self.settings.transcription_timeout_sec) as response:
+                        raw = json.loads(response.read().decode("utf-8"))
+                    normalized = self._normalize_azure_response(raw, locale)
+                    if normalized.get("segments"):
+                        return normalized
+                    last_raw = raw
+                except HTTPError as exc:
+                    if exc.code == 404:
+                        last_404 = exc
+                        continue
+                    raise
+
+        if last_404 is not None:
+            raise RuntimeError(
+                "Azure Speech endpoint not found (404). Check AZURE_SPEECH_REGION/ENDPOINT and resource region."
+            ) from last_404
+        if last_raw is not None:
+            status = str(last_raw.get("RecognitionStatus", "unknown"))
+            raise RuntimeError(
+                "Azure Speech returned no transcript text. "
+                f"RecognitionStatus={status}. "
+                "Possible reasons: unsupported audio codec/container, unclear/silent audio, or locale mismatch."
+            )
+        raise RuntimeError("Azure Speech transcription failed without response")
 
     @staticmethod
     def _language_hint_to_locale(language_mix: str) -> str:
@@ -184,6 +212,8 @@ class TranscriptionWorker:
     def _resolve_azure_speech_endpoint(self, locale: str) -> str:
         configured = str(self.settings.azure_speech_endpoint or "").strip().rstrip("/")
         if configured:
+            if ".api.cognitive.microsoft.com" in configured:
+                configured = configured.replace(".api.cognitive.microsoft.com", ".stt.speech.microsoft.com")
             if "/speech/recognition/" in configured:
                 if "language=" in configured:
                     return configured
@@ -200,18 +230,34 @@ class TranscriptionWorker:
             f"speech/recognition/conversation/cognitiveservices/v1?language={locale}&format=detailed"
         )
 
+    def _candidate_azure_speech_endpoints(self, locale: str) -> list[str]:
+        candidates: list[str] = []
+        configured = str(self.settings.azure_speech_endpoint or "").strip().rstrip("/")
+        if configured:
+            candidates.append(self._resolve_azure_speech_endpoint(locale))
+        if self.settings.azure_speech_region:
+            region_endpoint = (
+                f"https://{self.settings.azure_speech_region}.stt.speech.microsoft.com/"
+                f"speech/recognition/conversation/cognitiveservices/v1?language={locale}&format=detailed"
+            )
+            if region_endpoint not in candidates:
+                candidates.append(region_endpoint)
+        if not candidates:
+            raise RuntimeError("Set AZURE_SPEECH_REGION or AZURE_SPEECH_ENDPOINT")
+        return candidates
+
     @staticmethod
     def _normalize_azure_response(raw: dict, locale: str) -> dict:
+        segments = []
         nbest = raw.get("NBest") or []
         best = nbest[0] if isinstance(nbest, list) and nbest else {}
         display_text = str(raw.get("DisplayText") or best.get("Display") or best.get("Lexical") or "").strip()
-        confidence = float(best.get("Confidence", 0.85) or 0.85)
-        offset_ticks = int(raw.get("Offset", 0) or 0)
-        duration_ticks = int(raw.get("Duration", 0) or 0)
-        start_ms = max(0, offset_ticks // 10000)
-        end_ms = max(start_ms, start_ms + (duration_ticks // 10000))
-        segments = []
         if display_text:
+            confidence = float(best.get("Confidence", 0.85) or 0.85)
+            offset_ticks = int(raw.get("Offset", 0) or 0)
+            duration_ticks = int(raw.get("Duration", 0) or 0)
+            start_ms = max(0, offset_ticks // 10000)
+            end_ms = max(start_ms, start_ms + (duration_ticks // 10000))
             segments.append(
                 {
                     "start_ms": start_ms,
@@ -222,7 +268,66 @@ class TranscriptionWorker:
                     "needs_manual_review": False,
                 }
             )
+
+        recognized_phrases = raw.get("RecognizedPhrases") or []
+        for phrase in recognized_phrases:
+            phrase_text = str(phrase.get("Display") or phrase.get("Lexical") or "").strip()
+            if not phrase_text:
+                continue
+            offset_ticks = int(phrase.get("Offset", 0) or 0)
+            duration_ticks = int(phrase.get("Duration", 0) or 0)
+            start_ms = max(0, offset_ticks // 10000)
+            end_ms = max(start_ms, start_ms + (duration_ticks // 10000))
+            nbest_phrase = phrase.get("NBest") or []
+            best_phrase = nbest_phrase[0] if isinstance(nbest_phrase, list) and nbest_phrase else {}
+            confidence = float(best_phrase.get("Confidence", 0.85) or 0.85)
+            segments.append(
+                {
+                    "start_ms": start_ms,
+                    "end_ms": end_ms,
+                    "speaker_label": "unknown",
+                    "text": phrase_text,
+                    "confidence": confidence,
+                    "needs_manual_review": False,
+                }
+            )
+
+        if not segments:
+            combined = raw.get("CombinedRecognizedPhrases") or []
+            for phrase in combined:
+                text = str(phrase.get("Display") or phrase.get("Lexical") or "").strip()
+                if not text:
+                    continue
+                segments.append(
+                    {
+                        "start_ms": 0,
+                        "end_ms": 0,
+                        "speaker_label": "unknown",
+                        "text": text,
+                        "confidence": 0.85,
+                        "needs_manual_review": False,
+                    }
+                )
         return {"language_detected": locale, "segments": segments}
+
+    @staticmethod
+    def _normalize_audio_content_type(mime_type: str) -> str:
+        mime = str(mime_type or "").strip().lower()
+        mapping = {
+            "audio/x-m4a": "audio/mp4",
+            "audio/m4a": "audio/mp4",
+            "audio/mp3": "audio/mpeg",
+            "audio/x-wav": "audio/wav",
+        }
+        return mapping.get(mime, mime or "audio/wav")
+
+    @staticmethod
+    def _candidate_locales(primary_locale: str) -> list[str]:
+        candidates = [primary_locale]
+        for locale in ("en-IN", "en-US", "hi-IN"):
+            if locale not in candidates:
+                candidates.append(locale)
+        return candidates
 
     def _normalize_segments(self, segments: list[dict[str, Any]]) -> list[dict]:
         normalized: list[dict] = []
