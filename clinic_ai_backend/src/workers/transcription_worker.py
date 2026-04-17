@@ -111,6 +111,14 @@ class TranscriptionWorker:
             self.repo.mark_completed(job_id)
             self._auto_generate_default_note(job=job)
         except Exception as exc:  # noqa: BLE001
+            if "NON_RETRIABLE_NO_TEXT" in str(exc):
+                self.repo.mark_failed(
+                    job_id,
+                    error_code="TRANSCRIPTION_FAILED",
+                    error_message=str(exc).replace("NON_RETRIABLE_NO_TEXT: ", ""),
+                )
+                self.consumer.ack_last()
+                return True
             refreshed = self.repo.increment_retry(
                 job_id,
                 error_code="TRANSCRIPTION_FAILED_RETRY",
@@ -189,6 +197,7 @@ class TranscriptionWorker:
         if last_raw is not None:
             status = str(last_raw.get("RecognitionStatus", "unknown"))
             raise RuntimeError(
+                "NON_RETRIABLE_NO_TEXT: "
                 "Azure Speech returned no transcript text. "
                 f"RecognitionStatus={status}. "
                 "Possible reasons: unsupported audio codec/container, unclear/silent audio, or locale mismatch."
