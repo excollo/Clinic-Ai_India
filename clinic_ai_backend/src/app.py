@@ -1,7 +1,7 @@
 """FastAPI application factory module."""
 from fastapi import FastAPI
 
-from src.api.routers import health, patients, vitals, whatsapp, workflow
+from src.api.routers import health, patients, transcription, vitals, whatsapp, workflow
 
 
 def create_app() -> FastAPI:
@@ -12,6 +12,7 @@ def create_app() -> FastAPI:
     app.include_router(vitals.router)
     app.include_router(whatsapp.router)
     app.include_router(workflow.router)
+    app.include_router(transcription.router)
     return app
 
 

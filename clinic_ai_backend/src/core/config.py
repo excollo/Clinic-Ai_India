@@ -28,6 +28,32 @@ class Settings:
     whatsapp_intake_template_lang_en: str = os.getenv("WHATSAPP_INTAKE_TEMPLATE_LANG_EN", "en_US")
     whatsapp_intake_template_lang_hi: str = os.getenv("WHATSAPP_INTAKE_TEMPLATE_LANG_HI", "hi")
     whatsapp_intake_template_param_count: int = int(os.getenv("WHATSAPP_INTAKE_TEMPLATE_PARAM_COUNT", "1"))
+    azure_storage_account_name: str = os.getenv("AZURE_STORAGE_ACCOUNT_NAME", "")
+    azure_storage_account_key: str = os.getenv("AZURE_STORAGE_ACCOUNT_KEY", "")
+    azure_blob_container_audio: str = os.getenv("AZURE_BLOB_CONTAINER_AUDIO", "audio")
+    azure_speech_key: str = os.getenv("AZURE_SPEECH_KEY", "")
+    azure_speech_region: str = os.getenv("AZURE_SPEECH_REGION", "")
+    azure_speech_endpoint: str = os.getenv("AZURE_SPEECH_ENDPOINT", "")
+    transcription_confidence_threshold: float = float(
+        os.getenv("TRANSCRIPTION_CONFIDENCE_THRESHOLD", "0.75")
+    )
+    transcription_manual_review_ratio_threshold: float = float(
+        os.getenv("TRANSCRIPTION_MANUAL_REVIEW_RATIO_THRESHOLD", "0.25")
+    )
+    max_audio_size_mb: int = int(os.getenv("MAX_AUDIO_SIZE_MB", "25"))
+    allowed_audio_mime_types: list[str] = [
+        value.strip()
+        for value in os.getenv(
+            "ALLOWED_AUDIO_MIME_TYPES",
+            "audio/wav,audio/mpeg,audio/mp3,audio/x-wav,audio/mp4,audio/webm,audio/m4a,audio/x-m4a",
+        ).split(",")
+        if value.strip()
+    ]
+    transcription_max_retries: int = int(os.getenv("TRANSCRIPTION_MAX_RETRIES", "3"))
+    transcription_timeout_sec: int = int(os.getenv("TRANSCRIPTION_TIMEOUT_SEC", "120"))
+    use_local_adapters: bool = os.getenv("USE_LOCAL_ADAPTERS", "false").lower() == "true"
+    local_audio_storage_path: str = os.getenv("LOCAL_AUDIO_STORAGE_PATH", "/tmp/clinic_audio")
+    whisper_model_size: str = os.getenv("WHISPER_MODEL_SIZE", "medium")
 
 
 @lru_cache(maxsize=1)
