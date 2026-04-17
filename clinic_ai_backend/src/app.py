@@ -1,8 +1,7 @@
 """FastAPI application factory module."""
 from fastapi import FastAPI
 
-from src.api.routers import health, patients, transcription, vitals, whatsapp, workflow
-from src.workers.transcription_worker import start_background_workers, stop_background_workers
+from src.api.routers import health, notes, patients, transcription, vitals, whatsapp, workflow
 
 
 def create_app() -> FastAPI:
@@ -14,15 +13,7 @@ def create_app() -> FastAPI:
     app.include_router(whatsapp.router)
     app.include_router(workflow.router)
     app.include_router(transcription.router)
-
-    @app.on_event("startup")
-    async def _startup() -> None:
-        start_background_workers()
-
-    @app.on_event("shutdown")
-    async def _shutdown() -> None:
-        await stop_background_workers()
-
+    app.include_router(notes.router)
     return app
 
 
