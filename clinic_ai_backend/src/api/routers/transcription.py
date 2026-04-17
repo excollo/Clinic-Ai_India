@@ -65,6 +65,8 @@ async def upload_transcription_audio(
     stored_blob_path = storage_ref
     stored_blob_url = storage_ref
 
+    normalized_language_mix = _normalize_language_mix(language_mix)
+
     repo = AudioRepository()
     repo.create_audio_file(
         audio_id=audio_id,
@@ -77,7 +79,7 @@ async def upload_transcription_audio(
         size_bytes=len(payload),
         sha256=digest,
         noise_environment=noise_environment,
-        language_mix=language_mix,
+        language_mix=normalized_language_mix,
         speaker_mode=speaker_mode,
     )
     repo.create_job(
@@ -87,7 +89,7 @@ async def upload_transcription_audio(
         visit_id=visit_id,
         provider="azure_speech",
         noise_environment=noise_environment,
-        language_mix=language_mix,
+        language_mix=normalized_language_mix,
         speaker_mode=speaker_mode,
         max_retries=settings.transcription_max_retries,
     )
@@ -126,3 +128,11 @@ def get_transcription_result(job_id: str) -> TranscriptionResultResponse:
         raise HTTPException(status_code=404, detail="Transcription result not found")
     result.pop("_id", None)
     return TranscriptionResultResponse(**result)
+
+
+def _normalize_language_mix(value: str) -> str:
+    """Normalize input language hints; guard against Swagger default placeholder."""
+    normalized = str(value or "").strip().lower()
+    if normalized in {"", "string", "default"}:
+        return "en"
+    return normalized
