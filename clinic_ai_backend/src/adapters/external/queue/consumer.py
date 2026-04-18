@@ -1,4 +1,4 @@
-"""Queue consumer for transcription jobs."""
+"""Transcription job consumer — MongoDB FIFO or in-process asyncio queue (not Azure Queue)."""
 from __future__ import annotations
 
 from asyncio import QueueEmpty

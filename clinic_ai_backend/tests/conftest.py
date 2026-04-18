@@ -15,6 +15,11 @@ class InsertOneResult:
         self.inserted_id = inserted_id
 
 
+class UpdateResult:
+    def __init__(self, matched_count: int) -> None:
+        self.matched_count = matched_count
+
+
 class InMemoryCollection:
     def __init__(self) -> None:
         self.docs: list[dict] = []
@@ -74,7 +79,7 @@ class InMemoryCollection:
                 self.docs.pop(index)
                 return
 
-    def update_one(self, query: dict, update: dict) -> None:
+    def update_one(self, query: dict, update: dict, upsert: bool = False) -> UpdateResult:
         for index, doc in enumerate(self.docs):
             if self._matches(doc, query):
                 updated = deepcopy(doc)
@@ -83,7 +88,13 @@ class InMemoryCollection:
                 for key, value in update.get("$inc", {}).items():
                     updated[key] = int(updated.get(key, 0)) + int(value)
                 self.docs[index] = updated
-                return
+                return UpdateResult(1)
+        if upsert and update.get("$set"):
+            new_doc = {key: value for key, value in query.items()}
+            new_doc.update(update["$set"])
+            self.insert_one(new_doc)
+            return UpdateResult(1)
+        return UpdateResult(0)
 
     def update_many(self, query: dict, update: dict) -> None:
         for index, doc in enumerate(self.docs):
@@ -117,6 +128,7 @@ class InMemoryDatabase:
         self.patients = InMemoryCollection()
         self.patient_vitals = InMemoryCollection()
         self.clinical_notes = InMemoryCollection()
+        self.visit_transcription_sessions = InMemoryCollection()
 
 
 @pytest.fixture
@@ -141,6 +153,9 @@ def patched_db(fake_db: InMemoryDatabase, monkeypatch: pytest.MonkeyPatch) -> In
     monkeypatch.setattr("src.adapters.external.queue.producer.get_database", lambda: fake_db)
     monkeypatch.setattr("src.adapters.external.queue.consumer.get_database", lambda: fake_db)
     monkeypatch.setattr("src.adapters.db.mongo.repositories.audio_repository.get_database", lambda: fake_db)
+    monkeypatch.setattr(
+        "src.adapters.db.mongo.repositories.visit_transcription_repository.get_database", lambda: fake_db
+    )
     monkeypatch.setattr("src.adapters.db.mongo.repositories.clinical_note_repository.get_database", lambda: fake_db)
     monkeypatch.setattr("src.workers.transcription_worker.get_database", lambda: fake_db)
     monkeypatch.setattr("src.application.use_cases.generate_india_clinical_note.get_database", lambda: fake_db)
@@ -151,6 +166,13 @@ def patched_db(fake_db: InMemoryDatabase, monkeypatch: pytest.MonkeyPatch) -> In
 
 
 @pytest.fixture
-def app_client(patched_db: InMemoryDatabase) -> TestClient:
+def app_client(patched_db: InMemoryDatabase, monkeypatch: pytest.MonkeyPatch) -> TestClient:
+    """Disable background transcription workers so the in-memory queue stays deterministic."""
+    monkeypatch.setattr("src.app.start_background_workers", lambda: None)
+
+    async def _noop_stop() -> None:
+        return None
+
+    monkeypatch.setattr("src.app.stop_background_workers", _noop_stop)
     app = create_app()
     return TestClient(app)

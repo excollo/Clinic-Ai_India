@@ -14,10 +14,15 @@ from urllib.request import Request, urlopen
 
 from src.adapters.db.mongo.client import get_database
 from src.adapters.db.mongo.repositories.audio_repository import AudioRepository
-from src.adapters.external.storage.object_storage import AzureBlobStorage
+from src.adapters.db.mongo.repositories.visit_transcription_repository import VisitTranscriptionRepository
 from src.adapters.external.queue.consumer import TranscriptionQueueConsumer
 from src.adapters.external.queue.producer import TranscriptionQueueProducer
+from src.adapters.external.storage.object_storage import TranscriptionAudioStore
 from src.application.use_cases.generate_india_clinical_note import GenerateIndiaClinicalNoteUseCase
+from src.application.utils.transcript_dialogue import (
+    audio_duration_from_segments_ms,
+    segments_to_structured_dialogue,
+)
 from src.core.config import get_settings
 
 _BACKGROUND_TASKS: list[asyncio.Task] = []
@@ -66,6 +71,8 @@ class TranscriptionWorker:
                 error_code="PREVISIT_MISSING",
                 error_message="Pre-visit summary not found at processing time",
             )
+            self._sync_visit_failed(job, "Pre-visit summary not found at processing time")
+            self._purge_stored_audio(job)
             self.consumer.ack_last()
             return True
 
@@ -76,10 +83,12 @@ class TranscriptionWorker:
                 error_code="AUDIO_MISSING",
                 error_message="Audio metadata not found for transcription job",
             )
+            self._sync_visit_failed(job, "Audio metadata not found for transcription job")
             self.consumer.ack_last()
             return True
 
         self.repo.mark_processing(job_id)
+        self._sync_visit_processing(job)
         try:
             speech_response = await asyncio.wait_for(
                 asyncio.to_thread(self._call_azure_speech, job=job, audio_doc=audio_doc),
@@ -113,15 +122,20 @@ class TranscriptionWorker:
                     "segments": normalized,
                 }
             )
+            self._sync_visit_completed(job, full_text=full_text, normalized=normalized)
             self.repo.mark_completed(job_id)
             self._auto_generate_default_note(job=job)
+            self._purge_stored_audio(job)
         except Exception as exc:  # noqa: BLE001
             if "NON_RETRIABLE_NO_TEXT" in str(exc):
+                err_msg = str(exc).replace("NON_RETRIABLE_NO_TEXT: ", "")
                 self.repo.mark_failed(
                     job_id,
                     error_code="TRANSCRIPTION_FAILED",
-                    error_message=str(exc).replace("NON_RETRIABLE_NO_TEXT: ", ""),
+                    error_message=err_msg,
                 )
+                self._sync_visit_failed(job, err_msg)
+                self._purge_stored_audio(job)
                 self.consumer.ack_last()
                 return True
             refreshed = self.repo.increment_retry(
@@ -137,6 +151,8 @@ class TranscriptionWorker:
                     error_code="TRANSCRIPTION_FAILED",
                     error_message=str(exc),
                 )
+                self._sync_visit_failed(job, str(exc))
+                self._purge_stored_audio(job)
             else:
                 self.producer.enqueue(job_id)
         finally:
@@ -164,14 +180,81 @@ class TranscriptionWorker:
             is not None
         )
 
+    @staticmethod
+    def _visit_id(job: dict) -> str | None:
+        raw = job.get("visit_id")
+        if raw is None:
+            return None
+        text = str(raw).strip()
+        return text or None
+
+    def _sync_visit_processing(self, job: dict) -> None:
+        visit_id = self._visit_id(job)
+        if not visit_id:
+            return
+        VisitTranscriptionRepository().mark_processing(
+            patient_id=str(job["patient_id"]),
+            visit_id=visit_id,
+        )
+
+    def _sync_visit_completed(
+        self,
+        job: dict,
+        *,
+        full_text: str,
+        normalized: list[dict[str, Any]],
+    ) -> None:
+        visit_id = self._visit_id(job)
+        if not visit_id:
+            return
+        structured = segments_to_structured_dialogue(normalized)
+        duration = audio_duration_from_segments_ms(normalized)
+        word_count = len(full_text.split()) if full_text else 0
+        VisitTranscriptionRepository().mark_completed(
+            patient_id=str(job["patient_id"]),
+            visit_id=visit_id,
+            transcript=full_text,
+            structured_dialogue=structured,
+            word_count=word_count,
+            audio_duration_seconds=duration,
+        )
+
+    def _sync_visit_failed(self, job: dict, message: str) -> None:
+        visit_id = self._visit_id(job)
+        if not visit_id:
+            return
+        VisitTranscriptionRepository().mark_failed(
+            patient_id=str(job["patient_id"]),
+            visit_id=visit_id,
+            error_message=message,
+        )
+
+    @staticmethod
+    def _storage_ref_from_audio_doc(audio_doc: dict) -> str:
+        return str(
+            audio_doc.get("storage_ref")
+            or audio_doc.get("blob_url")
+            or audio_doc.get("blob_path")
+            or ""
+        ).strip()
+
+    def _purge_stored_audio(self, job: dict) -> None:
+        """Delete GridFS / temp file for this job's upload (best-effort)."""
+        doc = self.repo.get_audio_by_id(str(job.get("audio_id", "") or ""))
+        if not doc:
+            return
+        ref = self._storage_ref_from_audio_doc(doc)
+        if ref:
+            TranscriptionAudioStore().delete_by_ref(ref)
+
     def _call_azure_speech(self, *, job: dict, audio_doc: dict) -> dict:
         if not self.settings.azure_speech_key:
             raise RuntimeError("AZURE_SPEECH_KEY is not configured")
         primary_locale = self._language_hint_to_locale(str(job.get("language_mix", "") or "en"))
-        storage_ref = str(audio_doc.get("blob_url", "") or audio_doc.get("blob_path", "") or "")
+        storage_ref = self._storage_ref_from_audio_doc(audio_doc)
         if not storage_ref:
             raise RuntimeError("Audio storage reference not found")
-        audio_bytes = AzureBlobStorage().download_audio(storage_ref)
+        audio_bytes = TranscriptionAudioStore().download_audio(storage_ref)
         declared_mime = self._normalize_audio_content_type(str(audio_doc.get("mime_type", "") or "audio/wav"))
         last_404: HTTPError | None = None
         last_raw: dict | None = None

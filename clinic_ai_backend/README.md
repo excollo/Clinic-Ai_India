@@ -23,13 +23,12 @@ make dev
 | AZURE_SPEECH_KEY | Yes | Azure Speech Service API key | your-azure-speech-key |
 | AZURE_SPEECH_REGION | Yes* | Azure Speech region (required if endpoint not fully set) | centralindia |
 | AZURE_SPEECH_ENDPOINT | No | Optional explicit Speech endpoint | https://<region>.api.cognitive.microsoft.com/ |
-| AZURE_BLOB_CONTAINER_AUDIO | No | Logical container name in audio metadata | audio |
 | MAX_AUDIO_SIZE_MB | No | Max upload size in MB | 25 |
 | TRANSCRIPTION_MAX_RETRIES | No | Retry attempts for failed jobs | 3 |
 | TRANSCRIPTION_TIMEOUT_SEC | No | Worker timeout per transcription call | 120 |
-| USE_LOCAL_ADAPTERS | No | Use in-memory queue for local dev | true |
-| LOCAL_AUDIO_STORAGE_PATH | No | Local temp/audio path | /tmp/clinic_audio |
-| MONGO_AUDIO_BUCKET_NAME | No | Mongo GridFS bucket name | audio_blobs |
+| USE_LOCAL_ADAPTERS | No | If true: asyncio in-process transcription queue + temp files for audio when DB is not PyMongo | true |
+| LOCAL_AUDIO_STORAGE_PATH | No | Directory for temp transcription audio (non-GridFS / local adapters) | /tmp/clinic_audio |
+| MONGO_AUDIO_BUCKET_NAME | No | GridFS bucket name (Render + real MongoDB) | audio_blobs |
 | DEFAULT_NOTE_TYPE | No | Auto note generation type after transcription | india_clinical |
 | WHATSAPP_ACCESS_TOKEN | Yes (for WhatsApp) | Meta WhatsApp Cloud API token | EAA... |
 | WHATSAPP_PHONE_NUMBER_ID | Yes (for WhatsApp) | WhatsApp phone number id | 101648... |
@@ -39,6 +38,11 @@ make dev
 | WHATSAPP_INTAKE_TEMPLATE_LANG_EN | No | English template locale code | en_US |
 | WHATSAPP_INTAKE_TEMPLATE_LANG_HI | No | Hindi template locale code | hi |
 | WHATSAPP_INTAKE_TEMPLATE_PARAM_COUNT | No | Number of body params in template | 1 |
+
+## Doctor transcription (upload → poll → dialogue)
+- **Queue**: MongoDB collection `transcription_queue` (FIFO), or an in-process `asyncio` queue when `USE_LOCAL_ADAPTERS=true`. **Not** Azure Storage Queue.
+- **Audio**: Uploaded bytes go to **MongoDB GridFS** when the app uses a normal PyMongo `Database` (e.g. Render + Atlas). **No Azure Blob**. For local/tests with an in-memory DB stub, bytes are written under `LOCAL_AUDIO_STORAGE_PATH` as `file://` references.
+- **Azure Speech**: Short-audio REST API with **raw POST body bytes** (no SAS / cloud storage URL).
 
 ## Azure Speech and MP3 uploads
 Transcription sends audio to Azure’s short-audio REST API. Some MP3 variants decode to “success” with an empty transcript. The worker **normalizes uploads with FFmpeg** to 16 kHz mono PCM WAV before calling Azure when `ffmpeg` is on `PATH`.

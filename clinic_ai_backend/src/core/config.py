@@ -28,7 +28,6 @@ class Settings:
     whatsapp_intake_template_lang_en: str = os.getenv("WHATSAPP_INTAKE_TEMPLATE_LANG_EN", "en_US")
     whatsapp_intake_template_lang_hi: str = os.getenv("WHATSAPP_INTAKE_TEMPLATE_LANG_HI", "hi")
     whatsapp_intake_template_param_count: int = int(os.getenv("WHATSAPP_INTAKE_TEMPLATE_PARAM_COUNT", "1"))
-    azure_blob_container_audio: str = os.getenv("AZURE_BLOB_CONTAINER_AUDIO", "audio")
     azure_speech_key: str = os.getenv("AZURE_SPEECH_KEY", "") or os.getenv(
         "AZURE_SPEECH_SUBSCRIPTION_KEY", ""
     )

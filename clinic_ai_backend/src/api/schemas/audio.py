@@ -15,10 +15,12 @@ class TranscriptionUploadAcceptedResponse(BaseModel):
     """Async upload accepted response."""
 
     job_id: str
+    message_id: str
     patient_id: str
     visit_id: str | None
     status: Literal["queued", "processing", "completed", "failed"]
     received_at: datetime
+    message: str | None = None
 
 
 class TranscriptionJobStatusResponse(BaseModel):

@@ -1,4 +1,4 @@
-"""Queue producer for transcription jobs."""
+"""Transcription job queue — MongoDB FIFO collection (not Azure Storage Queue)."""
 from __future__ import annotations
 
 from asyncio import Queue
