@@ -10,7 +10,23 @@ So STT segments are stored with `speaker_label: "unknown"` at the Azure layer. *
 
 ### Fix implemented (Option 1)
 
-After structured dialogue is produced, we run a **deterministic alignment** (`align_segments_with_structured_dialogue` in `src/application/utils/transcript_dialogue.py`): monotone dynamic programming maps each segment’s text to the best-matching dialogue turn by **token overlap**, with `speaker_label` set to `doctor` / `patient` / `attendant` when overlap ≥ a small threshold, else `unknown`. Persisted `transcription_results.segments` then align with `structured_dialogue` when wording overlaps.
+After structured dialogue is produced, we run a **deterministic alignment** (`align_segments_with_structured_dialogue` in `src/application/utils/transcript_dialogue.py`): monotone dynamic programming maps each segment’s text to the best-matching dialogue turn by **token overlap**, with `speaker_label` set to **`Doctor` / `Patient` / `Family Member`** when overlap ≥ a small threshold, else **`Unknown`** (same vocabulary as `structured_dialogue` keys). Persisted `transcription_results.segments` then match the dialogue roles when wording overlaps.
+
+### Chunk STT: missing middle content (root cause & mitigations)
+
+**What went wrong historically**
+
+1. **Non-overlapping windows** — Hard splits every `TRANSCRIPTION_CHUNK_SECONDS` can cut words at boundaries; Azure returns one phrase per boundary side, so text at joins was easy to lose.
+2. **No per-chunk retries** — A single empty or flaky REST response for a middle chunk still advanced the loop; **no segment rows** were added for that wall-clock slice while the job continued, so `full_transcript_text` and `word_count` could stay far below what ~10+ minutes of speech implies.
+3. **Sparse phrase timestamps** — Large gaps in `start_ms` between phrases are normal (silence); they are **not** proof of dropped chunks. Use **`transcription_chunk_stt`** / **`transcription_pipeline_integrity`** logs to verify every chunk index ran.
+
+**What we do now**
+
+- **Overlap** — `TRANSCRIPTION_CHUNK_OVERLAP_SECONDS` (default **1.5**): FFmpeg extracts windows of length `chunk_sec` stepped by `chunk_sec − overlap`. Offsets use **`idx × step`** seconds, not `idx × chunk_sec`.
+- **Retries** — `TRANSCRIPTION_CHUNK_MAX_STT_RETRIES` (default **3**) re-posts the same chunk bytes on empty STT or HTTP **429 / 502 / 503**.
+- **No silent hard-fail for tiny tails** — If a chunk is small (`payload_bytes < 800_000`, roughly a short tail) and STT is still empty after retries, we log **`transcription_chunk_stt_empty_soft`** and continue; near-full chunks still **raise** so a broken STT path cannot hide.
+- **Dedupe** — Overlap can duplicate identical phrases; `dedupe_chunk_overlap_segments` removes time-overlapping near-identical lines before save.
+- **Logging** — Every chunk emits **`transcription_chunk_stt`** at INFO (`wall_s`, `payload_bytes`, `segments`, `words`, `http_status`). **`transcription_chunking`** logs `chunk_window_s`, `overlap_s`, and `step_s`.
 
 **Not chosen here (Option 2):** Azure **batch** transcription with diarization — higher quality, larger operational change (blob SAS, polling, SpeakerId → role mapping).
 

@@ -12,4 +12,5 @@ Return ONLY a valid JSON object with exactly these keys:
 - tests_recommended (array of strings)
 - self_care (array of strings)
 - warning_signs (array of strings)
-- follow_up (string)
+- follow_up (string, human-readable instructions for the patient)
+- next_visit_date (string or null): next follow-up visit date as ISO 8601 calendar date YYYY-MM-DD, or full datetime ISO if time is known; null only if no follow-up visit was scheduled or discussed

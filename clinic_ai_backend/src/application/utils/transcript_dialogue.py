@@ -3,11 +3,12 @@ from __future__ import annotations
 
 import copy
 import re
+from difflib import SequenceMatcher
 from typing import Any
 
 _TOKEN_RE = re.compile(r"[a-z0-9]+")
-# Below this overlap (segment recall), keep Azure as unknown rather than forcing a role.
-_MIN_SPEAKER_ALIGNMENT_OVERLAP = 0.08
+# Below this overlap (segment recall), keep Azure as Unknown rather than forcing a role.
+_MIN_SPEAKER_ALIGNMENT_OVERLAP = 0.06
 
 
 def segments_to_structured_dialogue(segments: list[dict[str, Any]]) -> list[dict[str, str]]:
@@ -16,6 +17,7 @@ def segments_to_structured_dialogue(segments: list[dict[str, Any]]) -> list[dict
         "doctor": "Doctor",
         "patient": "Patient",
         "attendant": "Family Member",
+        "family member": "Family Member",
         "unknown": "Patient",
     }
     out: list[dict[str, str]] = []
@@ -53,22 +55,18 @@ def _word_overlap_ratio(segment_text: str, turn_text: str) -> float:
 
 
 def _flatten_structured_turns(structured_dialogue: list[dict[str, str]]) -> list[tuple[str, str]]:
-    """(speaker_slug, text) in order — slugs match `_canonical_speaker` outputs."""
+    """(speaker_label, text) in order — labels are Doctor / Patient / Family Member (Mongo + UI)."""
     out: list[tuple[str, str]] = []
     for turn in structured_dialogue:
         if not isinstance(turn, dict):
             continue
-        for display_key, slug in (
-            ("Doctor", "doctor"),
-            ("Patient", "patient"),
-            ("Family Member", "attendant"),
-        ):
+        for display_key in ("Doctor", "Patient", "Family Member"):
             raw = turn.get(display_key)
             if raw is None:
                 continue
             text = str(raw).strip()
             if text:
-                out.append((slug, text))
+                out.append((display_key, text))
     return out
 
 
@@ -77,7 +75,7 @@ def align_segments_with_structured_dialogue(
     structured_dialogue: list[dict[str, str]],
 ) -> list[dict[str, Any]]:
     """
-    Map each STT segment to Doctor / Patient / attendant using structured dialogue from OpenAI
+    Map each STT segment to Doctor / Patient / Family Member using structured dialogue from OpenAI
     (or bundle-style turns), with monotone time-in-dialogue order.
 
     Azure short-audio REST responses do not include per-phrase speaker ids; STT segments are
@@ -132,16 +130,58 @@ def align_segments_with_structured_dialogue(
         seg_out = copy.deepcopy(seg)
         text = str(seg.get("text") or "").strip()
         if not text:
-            seg_out["speaker_label"] = "unknown"
+            seg_out["speaker_label"] = "Unknown"
             out.append(seg_out)
             continue
         tj = turn_idx[i]
         score = ovl[i][tj]
         if score < _MIN_SPEAKER_ALIGNMENT_OVERLAP:
-            seg_out["speaker_label"] = "unknown"
+            seg_out["speaker_label"] = "Unknown"
         else:
             seg_out["speaker_label"] = turns[tj][0]
         out.append(seg_out)
+    return out
+
+
+def dedupe_chunk_overlap_segments(segments: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """
+    Remove near-duplicate phrases introduced when overlapped chunk windows re-transcribe the same audio.
+
+    Keeps timeline order by ``start_ms``; drops a segment when it overlaps the previous in time and
+    matches text (exact or very high sequence similarity).
+    """
+    if len(segments) < 2:
+        return list(segments)
+    ordered = sorted(
+        segments,
+        key=lambda s: (int(s.get("start_ms", 0) or 0), int(s.get("end_ms", 0) or 0)),
+    )
+    out: list[dict[str, Any]] = []
+    for seg in ordered:
+        if not out:
+            out.append(seg)
+            continue
+        prev = out[-1]
+        try:
+            ps = int(prev.get("start_ms", 0) or 0)
+            pe = int(prev.get("end_ms", 0) or 0)
+            cs = int(seg.get("start_ms", 0) or 0)
+            ce = int(seg.get("end_ms", 0) or 0)
+        except (TypeError, ValueError):
+            out.append(seg)
+            continue
+        pt = str(prev.get("text", "")).strip().lower()
+        ct = str(seg.get("text", "")).strip().lower()
+        if not ct:
+            out.append(seg)
+            continue
+        overlap_ms = min(ce, pe) - max(cs, ps)
+        if overlap_ms > 0:
+            if pt == ct:
+                continue
+            if min(len(pt), len(ct)) >= 10 and SequenceMatcher(None, pt, ct).ratio() > 0.96:
+                continue
+        out.append(seg)
     return out
 
 

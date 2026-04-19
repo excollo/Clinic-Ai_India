@@ -1,9 +1,12 @@
 """Integration tests for notes generation flows."""
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
+
+from src.application.use_cases.process_follow_up_reminders import ProcessFollowUpRemindersUseCase
+from src.core import config as config_module
 
 
 def _insert_note_context(fake_db, patient_id: str, job_id: str = "job-n1", visit_id: str = "v1") -> None:
@@ -14,6 +17,7 @@ def _insert_note_context(fake_db, patient_id: str, job_id: str = "job-n1", visit
             "age": 42,
             "gender": "male",
             "preferred_language": "en",
+            "phone_number": "+919876543210",
         }
     )
     fake_db.pre_visit_summaries.insert_one(
@@ -139,6 +143,7 @@ def test_post_visit_summary_includes_whatsapp_payload(app_client, fake_db, monke
             "self_care": ["Drink fluids"],
             "warning_signs": ["Trouble breathing"],
             "follow_up": "Visit again in 3 days",
+            "next_visit_date": "2030-06-20",
         },
     )
     response = app_client.post(
@@ -154,6 +159,82 @@ def test_post_visit_summary_includes_whatsapp_payload(app_client, fake_db, monke
     assert "🔬" in payload["whatsapp_payload"]
     assert "📅" in payload["whatsapp_payload"]
     assert "⚠️" in payload["whatsapp_payload"]
+    reminder = fake_db.follow_up_reminders.find_one({"patient_id": "p-note-3", "visit_id": "v1"})
+    assert reminder is not None
+    assert reminder.get("to_number") == "919876543210"
+    assert reminder.get("note_id") == payload.get("note_id")
+
+
+def test_follow_up_reminders_run_sends_meta_template(app_client, patched_db, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Cron endpoint sends WhatsApp template at T-3d (uses intake/hello_world template when follow-up name unset)."""
+    settings = config_module.get_settings()
+    settings.whatsapp_access_token = "test-token"
+    settings.whatsapp_phone_number_id = "test-phone-id"
+    settings.whatsapp_intake_template_name = "hello_world"
+    settings.whatsapp_followup_template_name = ""
+    monkeypatch.setattr("src.core.config.get_settings", lambda: settings)
+
+    sent: list[dict] = []
+
+    def _stub_send_template(_self, *, to_number: str, template_name: str, language_code: str, body_values=None) -> None:
+        sent.append(
+            {"to": to_number, "template_name": template_name, "language_code": language_code, "body_values": body_values}
+        )
+
+    monkeypatch.setattr(
+        "src.application.use_cases.process_follow_up_reminders.MetaWhatsAppClient.send_template",
+        _stub_send_template,
+    )
+
+    nv = datetime(2030, 6, 20, 9, 0, tzinfo=timezone.utc)
+    patched_db.follow_up_reminders.insert_one(
+        {
+            "reminder_id": "r-fu-1",
+            "patient_id": "p-fu",
+            "visit_id": "v-fu",
+            "note_id": "n-fu",
+            "next_visit_at": nv,
+            "to_number": "919876543210",
+            "preferred_language": "en",
+            "follow_up_text": "Bring prior labs",
+            "remind_3d_sent_at": None,
+            "remind_24h_sent_at": None,
+            "created_at": nv - timedelta(days=10),
+            "updated_at": nv - timedelta(days=10),
+        }
+    )
+
+    fixed_now = datetime(2030, 6, 18, 10, 0, tzinfo=timezone.utc)
+    orig_execute = ProcessFollowUpRemindersUseCase.execute
+
+    def _execute_with_fixed_now(self, *, db, now=None):
+        return orig_execute(self, db=db, now=fixed_now)
+
+    monkeypatch.setattr(ProcessFollowUpRemindersUseCase, "execute", _execute_with_fixed_now)
+
+    response = app_client.post("/workflow/follow-up-reminders/run")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["sent_3d"] == 1
+    assert body["sent_24h"] == 0
+    assert len(sent) == 1
+    assert sent[0]["template_name"] == "hello_world"
+    assert sent[0]["to"] == "919876543210"
+
+    updated = patched_db.follow_up_reminders.find_one({"reminder_id": "r-fu-1"})
+    assert updated.get("remind_3d_sent_at") is not None
+
+
+def test_follow_up_reminders_run_requires_cron_secret_when_configured(
+    app_client, patched_db, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    settings = config_module.get_settings()
+    settings.follow_up_reminder_cron_secret = "expected-secret"
+    monkeypatch.setattr("src.core.config.get_settings", lambda: settings)
+    bad = app_client.post("/workflow/follow-up-reminders/run", headers={"X-Cron-Secret": "wrong"})
+    assert bad.status_code == 401
+    ok = app_client.post("/workflow/follow-up-reminders/run", headers={"X-Cron-Secret": "expected-secret"})
+    assert ok.status_code == 200
 
 
 def test_post_visit_summary_uses_request_language_override(app_client, fake_db, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -170,6 +251,7 @@ def test_post_visit_summary_uses_request_language_override(app_client, fake_db, 
             "self_care": [],
             "warning_signs": [],
             "follow_up": "7 days",
+            "next_visit_date": None,
         }
 
     monkeypatch.setattr("src.adapters.external.ai.openai_client.OpenAIQuestionClient.generate_post_visit_summary", _fake_generate)

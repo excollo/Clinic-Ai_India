@@ -28,6 +28,17 @@ class Settings:
     whatsapp_intake_template_lang_en: str = os.getenv("WHATSAPP_INTAKE_TEMPLATE_LANG_EN", "en_US")
     whatsapp_intake_template_lang_hi: str = os.getenv("WHATSAPP_INTAKE_TEMPLATE_LANG_HI", "hi")
     whatsapp_intake_template_param_count: int = int(os.getenv("WHATSAPP_INTAKE_TEMPLATE_PARAM_COUNT", "1"))
+    # Follow-up reminders (post-visit next visit). Defaults to intake template for hello_world-style testing.
+    whatsapp_followup_template_name: str = os.getenv("WHATSAPP_FOLLOWUP_TEMPLATE_NAME", "")
+    whatsapp_followup_template_lang_en: str = os.getenv(
+        "WHATSAPP_FOLLOWUP_TEMPLATE_LANG_EN", os.getenv("WHATSAPP_INTAKE_TEMPLATE_LANG_EN", "en_US")
+    )
+    whatsapp_followup_template_lang_hi: str = os.getenv(
+        "WHATSAPP_FOLLOWUP_TEMPLATE_LANG_HI", os.getenv("WHATSAPP_INTAKE_TEMPLATE_LANG_HI", "hi")
+    )
+    whatsapp_followup_template_param_count: int = int(os.getenv("WHATSAPP_FOLLOWUP_TEMPLATE_PARAM_COUNT", "1"))
+    # If set, POST /workflow/follow-up-reminders/run requires header X-Cron-Secret with this value.
+    follow_up_reminder_cron_secret: str = os.getenv("FOLLOW_UP_REMINDER_CRON_SECRET", "")
     azure_speech_key: str = os.getenv("AZURE_SPEECH_KEY", "") or os.getenv(
         "AZURE_SPEECH_SUBSCRIPTION_KEY", ""
     )
@@ -58,6 +69,10 @@ class Settings:
         os.getenv("TRANSCRIPTION_SHORT_AUDIO_MAX_SECONDS", "55")
     )
     transcription_chunk_seconds: float = float(os.getenv("TRANSCRIPTION_CHUNK_SECONDS", "50"))
+    # Overlap between consecutive WAV windows sent to Azure (reduces word loss at chunk boundaries; requires ffmpeg).
+    transcription_chunk_overlap_seconds: float = float(os.getenv("TRANSCRIPTION_CHUNK_OVERLAP_SECONDS", "1.5"))
+    # Retries per chunk for transient HTTP errors or empty STT payloads (same bytes re-posted).
+    transcription_chunk_max_stt_retries: int = int(os.getenv("TRANSCRIPTION_CHUNK_MAX_STT_RETRIES", "3"))
     # Set to "1" / "true" to log byte sizes and chunk counts at INFO (one line per job).
     transcription_debug_bytes: bool = os.getenv("TRANSCRIPTION_DEBUG_BYTES", "").lower() in {"1", "true", "yes"}
     # Raw transcript is split into contiguous slices <= this size before OpenAI structuring (ordered merge).

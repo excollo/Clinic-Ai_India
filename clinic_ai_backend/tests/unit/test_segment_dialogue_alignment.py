@@ -1,7 +1,11 @@
 """Align STT segments to structured Doctor/Patient turns (Azure REST has no diarization)."""
 from __future__ import annotations
 
-from src.application.utils.transcript_dialogue import align_segments_with_structured_dialogue, segment_gap_audit
+from src.application.utils.transcript_dialogue import (
+    align_segments_with_structured_dialogue,
+    dedupe_chunk_overlap_segments,
+    segment_gap_audit,
+)
 
 
 def test_aligns_two_segments_to_alternating_doctor_patient() -> None:
@@ -21,8 +25,8 @@ def test_aligns_two_segments_to_alternating_doctor_patient() -> None:
         },
     ]
     out = align_segments_with_structured_dialogue(segments, structured)
-    assert out[0]["speaker_label"] == "doctor"
-    assert out[1]["speaker_label"] == "patient"
+    assert out[0]["speaker_label"] == "Doctor"
+    assert out[1]["speaker_label"] == "Patient"
 
 
 def test_single_segment_maps_to_best_overlapping_turn_not_all_unknown() -> None:
@@ -38,7 +42,7 @@ def test_single_segment_maps_to_best_overlapping_turn_not_all_unknown() -> None:
         }
     ]
     out = align_segments_with_structured_dialogue(segments, structured)
-    assert out[0]["speaker_label"] == "patient"
+    assert out[0]["speaker_label"] == "Patient"
 
 
 def test_low_overlap_keeps_unknown() -> None:
@@ -54,7 +58,7 @@ def test_low_overlap_keeps_unknown() -> None:
         }
     ]
     out = align_segments_with_structured_dialogue(segments, structured)
-    assert out[0]["speaker_label"] == "unknown"
+    assert out[0]["speaker_label"] == "Unknown"
 
 
 def test_segment_gap_audit_sums_spans_and_max_gap() -> None:
@@ -80,4 +84,13 @@ def test_family_member_turn_maps_to_attendant_slug() -> None:
         }
     ]
     out = align_segments_with_structured_dialogue(segments, structured)
-    assert out[0]["speaker_label"] == "attendant"
+    assert out[0]["speaker_label"] == "Family Member"
+
+
+def test_dedupe_chunk_overlap_removes_duplicate_time_text() -> None:
+    segs = [
+        {"start_ms": 47000, "end_ms": 48000, "text": "same phrase", "speaker_label": "Unknown"},
+        {"start_ms": 47200, "end_ms": 47800, "text": "same phrase", "speaker_label": "Unknown"},
+    ]
+    out = dedupe_chunk_overlap_segments(segs)
+    assert len(out) == 1

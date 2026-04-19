@@ -8,6 +8,8 @@ from src.adapters.db.mongo.client import get_database
 from src.adapters.db.mongo.repositories.audio_repository import AudioRepository
 from src.adapters.db.mongo.repositories.clinical_note_repository import ClinicalNoteRepository
 from src.adapters.services.post_visit_summary_service import PostVisitSummaryService
+from src.application.use_cases.schedule_follow_up_reminders import schedule_follow_up_after_post_visit
+from src.application.utils.follow_up_dates import parse_next_visit_at
 
 
 def _utc_now() -> datetime:
@@ -85,6 +87,15 @@ class GeneratePostVisitSummaryUseCase:
         }
         created = self.note_repo.create_note(note_doc)
         created.pop("_id", None)
+        schedule_follow_up_after_post_visit(
+            db=self.db,
+            patient_id=patient_id,
+            visit_id=str(created.get("visit_id") or ""),
+            note_id=str(created.get("note_id") or ""),
+            payload=payload,
+            patient=patient,
+            preferred_language=resolved_language,
+        )
         return created
 
     def _resolve_transcription_job(
@@ -137,6 +148,12 @@ class GeneratePostVisitSummaryUseCase:
         payload["self_care"] = [str(item).strip() for item in (payload.get("self_care") or []) if str(item).strip()]
         payload["warning_signs"] = [str(item).strip() for item in (payload.get("warning_signs") or []) if str(item).strip()]
         payload.setdefault("follow_up", "Follow your doctor's advice for the next review.")
+        nd = payload.get("next_visit_date")
+        parsed = parse_next_visit_at(nd)
+        if parsed:
+            payload["next_visit_date"] = parsed.date().isoformat()
+        else:
+            payload.pop("next_visit_date", None)
         return payload
 
     @staticmethod
@@ -162,7 +179,13 @@ class GeneratePostVisitSummaryUseCase:
         for item in india_payload.get("investigations", []) or []:
             if isinstance(item, dict) and str(item.get("test_name") or "").strip():
                 tests.append(str(item.get("test_name")).strip())
-        return {
+        fu_raw = india_payload.get("follow_up_date")
+        next_visit_iso: str | None = None
+        if fu_raw not in (None, ""):
+            p = parse_next_visit_at(fu_raw)
+            if p:
+                next_visit_iso = p.date().isoformat()
+        out = {
             "visit_reason": str(india_payload.get("chief_complaint") or "Your concern discussed during this visit."),
             "what_doctor_found": str(india_payload.get("assessment") or "Findings based on doctor consultation."),
             "medicines_to_take": meds,
@@ -175,6 +198,9 @@ class GeneratePostVisitSummaryUseCase:
                 or "Follow up as advised by your doctor."
             ),
         }
+        if next_visit_iso:
+            out["next_visit_date"] = next_visit_iso
+        return out
 
     @staticmethod
     def _build_whatsapp_payload(*, payload: dict) -> str:

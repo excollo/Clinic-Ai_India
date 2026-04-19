@@ -1,13 +1,35 @@
 """Workflow routes module."""
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Header, HTTPException
 
 from src.adapters.db.mongo.client import get_database
 from src.api.schemas.vitals import LatestVitalsResponse, VitalsFormResponse
-from src.api.schemas.workflow import DoctorAppointmentViewResponse, PreVisitSummaryResponse
+from src.api.schemas.workflow import (
+    DoctorAppointmentViewResponse,
+    FollowUpRemindersRunResponse,
+    PreVisitSummaryResponse,
+)
 from src.application.use_cases.generate_pre_visit_summary import GeneratePreVisitSummaryUseCase
+from src.application.use_cases.process_follow_up_reminders import ProcessFollowUpRemindersUseCase
 from src.application.use_cases.store_vitals import StoreVitalsUseCase
+from src.core.config import get_settings
 
 router = APIRouter(prefix="/workflow", tags=["Workflow"])
+
+
+@router.post("/follow-up-reminders/run", response_model=FollowUpRemindersRunResponse)
+def run_follow_up_reminders(x_cron_secret: str | None = Header(default=None, alias="X-Cron-Secret")) -> FollowUpRemindersRunResponse:
+    """
+    Process due follow-up WhatsApp template reminders (3 days and 24 hours before ``next_visit_at``).
+
+    Intended to be called on a schedule (e.g. Render cron every hour). Optionally protect with
+    ``FOLLOW_UP_REMINDER_CRON_SECRET`` and header ``X-Cron-Secret``.
+    """
+    settings = get_settings()
+    expected = (settings.follow_up_reminder_cron_secret or "").strip()
+    if expected and (x_cron_secret or "").strip() != expected:
+        raise HTTPException(status_code=401, detail="Invalid or missing X-Cron-Secret")
+    result = ProcessFollowUpRemindersUseCase().execute(db=get_database())
+    return FollowUpRemindersRunResponse(**result)
 
 
 @router.post("/pre-visit-summary/{patient_id}/{visit_id}", response_model=PreVisitSummaryResponse)

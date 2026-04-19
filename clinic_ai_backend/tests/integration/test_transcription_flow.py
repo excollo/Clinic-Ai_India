@@ -452,4 +452,4 @@ def test_worker_visit_uses_openai_structure_when_segments_are_unknown(
     result = fake_db.transcription_results.find_one({"job_id": "j10"})
     assert result is not None
     assert len(result.get("segments") or []) == 1
-    assert result["segments"][0]["speaker_label"] == "patient"
+    assert result["segments"][0]["speaker_label"] == "Patient"

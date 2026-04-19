@@ -21,7 +21,7 @@ def test_normalize_azure_response_yields_single_unknown_speaker_segment() -> Non
     out = TranscriptionWorker._normalize_azure_response(raw, "en-IN")
     segs = out["segments"]
     assert len(segs) == 1
-    assert segs[0]["speaker_label"] == "unknown"
+    assert segs[0]["speaker_label"] == "Unknown"
     assert "throat" in segs[0]["text"].lower()
 
 

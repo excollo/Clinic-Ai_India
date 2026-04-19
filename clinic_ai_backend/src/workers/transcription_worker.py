@@ -8,6 +8,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError
@@ -26,6 +27,7 @@ from src.application.use_cases.generate_india_clinical_note import GenerateIndia
 from src.application.utils.transcript_dialogue import (
     align_segments_with_structured_dialogue,
     audio_duration_from_segments_ms,
+    dedupe_chunk_overlap_segments,
     segment_gap_audit,
     segments_to_structured_dialogue,
 )
@@ -349,13 +351,23 @@ class TranscriptionWorker:
         except (ValueError, subprocess.TimeoutExpired):
             return None
 
-    def _split_wav_into_time_chunks(self, wav_bytes: bytes, chunk_sec: float) -> list[bytes]:
-        """Split PCM WAV into <= chunk_sec pieces for Azure short-audio REST (≈60s max per request)."""
+    def _split_wav_into_time_chunks(
+        self, wav_bytes: bytes, chunk_sec: float, overlap_sec: float = 0.0
+    ) -> tuple[list[bytes], float]:
+        """
+        Split PCM WAV into <= chunk_sec windows for Azure short-audio REST (≈60s max per request).
+
+        Returns ``(chunk_wav_bytes_list, step_sec)`` where ``step_sec = chunk_sec - overlap_sec`` is the
+        advance along the source timeline between windows (overlap reduces boundary word loss).
+        """
         if chunk_sec < 10:
             chunk_sec = 50.0
+        overlap_sec = max(0.0, float(overlap_sec or 0.0))
+        overlap_sec = min(overlap_sec, chunk_sec * 0.45)
+        step_sec = max(0.5, chunk_sec - overlap_sec)
         ffmpeg_bin = shutil.which("ffmpeg")
         if not ffmpeg_bin:
-            return [wav_bytes]
+            return [wav_bytes], chunk_sec
         dur = self._pcm_wav_duration_seconds(wav_bytes)
         with tempfile.TemporaryDirectory() as tmp:
             src = Path(tmp) / "src.wav"
@@ -363,7 +375,7 @@ class TranscriptionWorker:
             if dur is None:
                 dur = self._ffprobe_duration_seconds(str(src)) or 0.0
             if dur <= chunk_sec + 0.1:
-                return [wav_bytes]
+                return [wav_bytes], chunk_sec
             chunks: list[bytes] = []
             start = 0.0
             idx = 0
@@ -397,17 +409,18 @@ class TranscriptionWorker:
                         f"{(proc.stderr or b'').decode('utf-8', errors='replace')[:400]}"
                     )
                 chunks.append(out.read_bytes())
-                start += chunk_sec
+                start += step_sec
                 idx += 1
-            return chunks if chunks else [wav_bytes]
+            return (chunks if chunks else [wav_bytes]), step_sec
 
     def _short_audio_recognize_one_payload(
         self, *, audio_payload: bytes, content_type: str, primary_locale: str
-    ) -> tuple[dict | None, HTTPError | None, dict | None]:
+    ) -> tuple[dict | None, HTTPError | None, dict | None, int | None, str | None]:
         """
-        One body POST to Azure short-audio REST; try locales/endpoints until text is returned.
+        One full pass over locales/endpoints for Azure short-audio REST.
 
-        Microsoft documents ~60s max audio per request for this API; see `_candidate_azure_speech_endpoints`.
+        Returns ``(normalized, last_404, last_raw, http_status, detail)``.
+        ``detail`` is an HTTP body snippet, ``"exhausted_no_segments"``, or ``None`` when segments exist.
         """
         last_404: HTTPError | None = None
         last_raw: dict | None = None
@@ -420,21 +433,121 @@ class TranscriptionWorker:
                     req.add_header("Accept", "application/json;text/xml")
                     req.add_header("Content-Type", content_type)
                     with urlopen(req, timeout=http_timeout) as response:
-                        raw = json.loads(response.read().decode("utf-8"))
+                        raw_bytes = response.read()
+                        status = getattr(response, "status", None)
+                        if status is None:
+                            status = response.getcode()
+                        raw = json.loads(raw_bytes.decode("utf-8"))
                     if isinstance(raw, list):
                         raw = next((item for item in raw if isinstance(item, dict)), {})
                     if not isinstance(raw, dict):
                         continue
                     normalized = self._normalize_azure_response(raw, locale)
                     if normalized.get("segments"):
-                        return normalized, last_404, last_raw
+                        return normalized, last_404, last_raw, int(status or 200), None
                     last_raw = raw if isinstance(raw, dict) else last_raw
                 except HTTPError as exc:
+                    err_body = ""
+                    try:
+                        err_body = exc.read().decode("utf-8", errors="replace")[:800]
+                    except Exception:
+                        err_body = str(exc)[:800]
                     if exc.code == 404:
                         last_404 = exc
                         continue
-                    raise
-        return None, last_404, last_raw
+                    if exc.code in (429, 502, 503):
+                        return None, last_404, last_raw, exc.code, err_body
+                    raise RuntimeError(
+                        f"Azure Speech HTTP {exc.code} for short-audio STT: {err_body[:300]}"
+                    ) from exc
+        return None, last_404, last_raw, None, "exhausted_no_segments"
+
+    def _stt_recognize_chunk_with_retries(
+        self,
+        *,
+        audio_payload: bytes,
+        content_type: str,
+        primary_locale: str,
+        job_id: str,
+        chunk_idx: int,
+        chunk_total: int,
+        wall_start_s: float,
+        wall_end_s: float,
+    ) -> dict:
+        """POST one chunk to Azure with retries; raises if no segments after all attempts."""
+        attempts = max(1, int(self.settings.transcription_chunk_max_stt_retries))
+        last_detail = "exhausted_no_segments"
+        last_status: int | None = None
+        for attempt in range(attempts):
+            normalized, _l404, _lraw, status, detail = self._short_audio_recognize_one_payload(
+                audio_payload=audio_payload,
+                content_type=content_type,
+                primary_locale=primary_locale,
+            )
+            last_detail = detail or last_detail
+            last_status = status
+            segs = (normalized or {}).get("segments") or []
+            if normalized and segs:
+                wc = sum(len(str(s.get("text", "")).split()) for s in segs)
+                logger.info(
+                    "transcription_chunk_stt job_id=%s chunk=%s/%s attempt=%s/%s wall_s=%.2f-%.2f "
+                    "payload_bytes=%s segments=%s words=%s http_status=%s",
+                    job_id,
+                    chunk_idx + 1,
+                    chunk_total,
+                    attempt + 1,
+                    attempts,
+                    wall_start_s,
+                    wall_end_s,
+                    len(audio_payload),
+                    len(segs),
+                    wc,
+                    status,
+                )
+                return normalized
+            retryable = status in (429, 502, 503) or detail == "exhausted_no_segments"
+            if attempt < attempts - 1 and retryable:
+                logger.warning(
+                    "transcription_chunk_stt_retry job_id=%s chunk=%s/%s attempt=%s http=%s detail=%s",
+                    job_id,
+                    chunk_idx + 1,
+                    chunk_total,
+                    attempt + 1,
+                    status,
+                    (detail or "")[:200],
+                )
+                time.sleep(0.5 * (attempt + 1))
+                continue
+            break
+        chunk_dur = self._pcm_wav_duration_seconds(audio_payload) or 0.0
+        logger.error(
+            "transcription_chunk_stt_failed job_id=%s chunk=%s/%s attempts=%s http=%s chunk_dur_s=%.2f "
+            "payload_bytes=%s detail=%s",
+            job_id,
+            chunk_idx + 1,
+            chunk_total,
+            attempts,
+            last_status,
+            chunk_dur,
+            len(audio_payload),
+            (last_detail or "")[:300],
+        )
+        # Long silent stretches or a very short tail window can legitimately return no words; fail loud only
+        # for a near-full chunk (~25s+ PCM) so we never hide a broken STT path for most of the visit.
+        if len(audio_payload) < 800_000:
+            logger.warning(
+                "transcription_chunk_stt_empty_soft job_id=%s chunk=%s/%s bytes=%s (treating as silent tail)",
+                job_id,
+                chunk_idx + 1,
+                chunk_total,
+                len(audio_payload),
+            )
+            return {"language_detected": primary_locale, "segments": []}
+        raise RuntimeError(
+            f"Azure STT produced no segments for chunk {chunk_idx + 1}/{chunk_total} "
+            f"(wall ~{wall_start_s:.1f}-{wall_end_s:.1f}s, ~{chunk_dur:.1f}s of audio) after {attempts} attempts. "
+            f"last_http={last_status} detail={last_detail!r}"
+        )
 
     def _raise_azure_recognition_failure(
         self,
@@ -491,6 +604,8 @@ class TranscriptionWorker:
         merged_segments: list[dict[str, Any]],
         use_chunked_stt: bool,
         chunk_sec: float | None = None,
+        chunk_step_sec: float | None = None,
+        chunk_overlap_sec: float | None = None,
     ) -> None:
         """
         One INFO line per successful STT path: stored vs downloaded bytes, WAV duration, and STT wire volume.
@@ -522,7 +637,12 @@ class TranscriptionWorker:
         max_end_s = max_end_ms / 1000.0 if max_end_ms else None
         gap_stats = segment_gap_audit(merged_segments)
         wall_span_s: float | None = None
-        if use_chunked_stt and chunk_sec is not None and azure_post_count:
+        if use_chunked_stt and chunk_sec is not None and azure_post_count and chunk_step_sec is not None:
+            wall_span_s = round(
+                float(azure_post_count - 1) * float(chunk_step_sec) + float(chunk_sec),
+                3,
+            )
+        elif use_chunked_stt and chunk_sec is not None and azure_post_count:
             wall_span_s = round(float(azure_post_count) * float(chunk_sec), 3)
         if wav_duration_s and max_end_s and wav_duration_s > 60:
             drift = abs(max_end_s - wav_duration_s) / wav_duration_s
@@ -545,7 +665,7 @@ class TranscriptionWorker:
             "transcription_pipeline_integrity job_id=%s audio_id=%s stored_bytes=%s download_bytes=%s "
             "stored_eq_download=%s transcoded_wav_bytes=%s wav_duration_s=%s chunked_stt=%s azure_post_count=%s "
             "stt_request_bytes_total=%s segments=%s max_segment_end_s=%s speech_span_s=%s max_consecutive_gap_ms=%s "
-            "chunk_wall_span_s=%s",
+            "chunk_wall_span_s=%s chunk_step_s=%s chunk_overlap_s=%s",
             job.get("job_id"),
             audio_doc.get("audio_id"),
             meta_int if meta_int is not None else raw_meta,
@@ -561,6 +681,8 @@ class TranscriptionWorker:
             gap_stats["speech_span_s"],
             int(gap_stats["max_consecutive_gap_ms"]),
             wall_span_s,
+            round(float(chunk_step_sec), 3) if chunk_step_sec is not None else None,
+            round(float(chunk_overlap_sec), 3) if chunk_overlap_sec is not None else None,
         )
         if self.settings.transcription_debug_bytes and use_chunked_stt and wall_span_s is not None and wav_duration_s:
             logger.info(
@@ -588,6 +710,7 @@ class TranscriptionWorker:
         wav_duration = self._pcm_wav_duration_seconds(wav_bytes) if wav_bytes else None
         max_short = float(self.settings.transcription_short_audio_max_seconds)
         chunk_sec = float(self.settings.transcription_chunk_seconds)
+        overlap_sec_cfg = float(self.settings.transcription_chunk_overlap_seconds)
 
         if self.settings.transcription_debug_bytes:
             logger.info(
@@ -621,31 +744,35 @@ class TranscriptionWorker:
         last_raw: dict | None = None
 
         if use_chunks:
-            wav_chunks = self._split_wav_into_time_chunks(wav_bytes, chunk_sec)
+            wav_chunks, step_sec = self._split_wav_into_time_chunks(
+                wav_bytes, chunk_sec, overlap_sec_cfg
+            )
             stt_total_bytes = sum(len(c) for c in wav_chunks)
-            if self.settings.transcription_debug_bytes:
-                logger.info(
-                    "transcription_chunking job_id=%s chunk_count=%s chunk_sec=%s",
-                    job.get("job_id"),
-                    len(wav_chunks),
-                    chunk_sec,
-                )
+            n_chunks = len(wav_chunks)
+            logger.info(
+                "transcription_chunking job_id=%s chunk_count=%s chunk_window_s=%s overlap_s=%s step_s=%s",
+                job.get("job_id"),
+                n_chunks,
+                round(chunk_sec, 3),
+                round(max(0.0, chunk_sec - step_sec), 3),
+                round(step_sec, 3),
+            )
             for idx, chunk_bytes in enumerate(wav_chunks):
-                # Offsets must follow wall-clock chunk placement in the file, not the last
-                # word end inside the chunk; otherwise long silent gaps collapse the timeline
-                # and `audio_duration_from_segments_ms` under-reports visit length.
-                chunk_offset_ms = int(round(idx * float(chunk_sec) * 1000.0))
-                normalized, l404, lraw = self._short_audio_recognize_one_payload(
+                wall_start_s = float(idx) * float(step_sec)
+                wall_end_s = min(float(wav_duration or 0.0), wall_start_s + float(chunk_sec))
+                chunk_offset_ms = int(round(wall_start_s * 1000.0))
+                normalized = self._stt_recognize_chunk_with_retries(
                     audio_payload=chunk_bytes,
                     content_type="audio/wav",
                     primary_locale=primary_locale,
+                    job_id=str(job.get("job_id", "")),
+                    chunk_idx=idx,
+                    chunk_total=n_chunks,
+                    wall_start_s=wall_start_s,
+                    wall_end_s=wall_end_s,
                 )
-                if l404:
-                    last_404 = l404
-                if lraw:
-                    last_raw = lraw
-                segs = (normalized or {}).get("segments") or []
                 merged_lang = (normalized or {}).get("language_detected") or merged_lang
+                segs = (normalized or {}).get("segments") or []
                 for seg in segs:
                     merged_segments.append(
                         {
@@ -656,12 +783,23 @@ class TranscriptionWorker:
                     )
                 if self.settings.transcription_debug_bytes:
                     logger.info(
-                        "transcription_chunk job_id=%s index=%s chunk_bytes=%s segments=%s chunk_offset_ms=%s",
+                        "transcription_chunk_merge job_id=%s index=%s chunk_bytes=%s segments=%s chunk_offset_ms=%s",
                         job.get("job_id"),
                         idx,
                         len(chunk_bytes),
                         len(segs),
                         chunk_offset_ms,
+                    )
+            if max(0.0, chunk_sec - step_sec) > 0.01 and merged_segments:
+                before = len(merged_segments)
+                merged_segments = dedupe_chunk_overlap_segments(merged_segments)
+                removed = before - len(merged_segments)
+                if removed:
+                    logger.info(
+                        "transcription_chunk_overlap_dedupe job_id=%s removed_segments=%s kept=%s",
+                        job.get("job_id"),
+                        removed,
+                        len(merged_segments),
                     )
             if merged_segments:
                 self._log_transcription_pipeline_integrity(
@@ -670,12 +808,14 @@ class TranscriptionWorker:
                     download_bytes=len(audio_bytes),
                     transcoded_wav_bytes=len(wav_bytes) if wav_bytes else None,
                     wav_duration_s=wav_duration,
-                    azure_post_count=len(wav_chunks),
+                    azure_post_count=n_chunks,
                     stt_request_bytes_total=stt_total_bytes,
                     segment_count=len(merged_segments),
                     merged_segments=merged_segments,
                     use_chunked_stt=True,
                     chunk_sec=chunk_sec,
+                    chunk_step_sec=step_sec,
+                    chunk_overlap_sec=max(0.0, chunk_sec - step_sec),
                 )
                 return {"language_detected": merged_lang, "segments": merged_segments}
             self._raise_azure_recognition_failure(
@@ -683,7 +823,7 @@ class TranscriptionWorker:
             )
 
         for audio_payload, content_type in self._audio_payload_candidates(audio_bytes, declared_mime, wav_bytes):
-            normalized, l404, lraw = self._short_audio_recognize_one_payload(
+            normalized, l404, lraw, status, _detail = self._short_audio_recognize_one_payload(
                 audio_payload=audio_payload,
                 content_type=content_type,
                 primary_locale=primary_locale,
@@ -694,6 +834,15 @@ class TranscriptionWorker:
                 last_raw = lraw
             if normalized and normalized.get("segments"):
                 segs = normalized.get("segments") or []
+                wc = sum(len(str(s.get("text", "")).split()) for s in segs)
+                logger.info(
+                    "transcription_short_stt job_id=%s payload_bytes=%s segments=%s words=%s http_status=%s",
+                    job.get("job_id"),
+                    len(audio_payload),
+                    len(segs),
+                    wc,
+                    status,
+                )
                 self._log_transcription_pipeline_integrity(
                     job=job,
                     audio_doc=audio_doc,
@@ -861,7 +1010,7 @@ class TranscriptionWorker:
                 {
                     "start_ms": start_ms,
                     "end_ms": end_ms,
-                    "speaker_label": "unknown",
+                    "speaker_label": "Unknown",
                     "text": display_text,
                     "confidence": confidence,
                     "needs_manual_review": False,
@@ -884,7 +1033,7 @@ class TranscriptionWorker:
                 {
                     "start_ms": start_ms,
                     "end_ms": end_ms,
-                    "speaker_label": "unknown",
+                    "speaker_label": "Unknown",
                     "text": phrase_text,
                     "confidence": confidence,
                     "needs_manual_review": False,
@@ -901,7 +1050,7 @@ class TranscriptionWorker:
                     {
                         "start_ms": 0,
                         "end_ms": 0,
-                        "speaker_label": "unknown",
+                        "speaker_label": "Unknown",
                         "text": text,
                         "confidence": 0.85,
                         "needs_manual_review": False,
@@ -917,7 +1066,7 @@ class TranscriptionWorker:
                         {
                             "start_ms": 0,
                             "end_ms": 0,
-                            "speaker_label": "unknown",
+                            "speaker_label": "Unknown",
                             "text": combined,
                             "confidence": 0.85,
                             "needs_manual_review": False,
@@ -987,16 +1136,19 @@ class TranscriptionWorker:
 
     @staticmethod
     def _canonical_speaker(value: str | None) -> str:
+        """Normalize labels for Mongo/API (aligned with structured_dialogue role names)."""
         if not value:
-            return "unknown"
-        speaker = value.lower().strip()
+            return "Unknown"
+        speaker = str(value).strip().lower()
         if speaker in {"doctor", "physician", "clinician"}:
-            return "doctor"
+            return "Doctor"
         if speaker in {"patient", "speaker_1"}:
-            return "patient"
-        if speaker in {"attendant", "caregiver", "speaker_2"}:
-            return "attendant"
-        return "unknown"
+            return "Patient"
+        if speaker in {"attendant", "caregiver", "speaker_2", "family member"}:
+            return "Family Member"
+        if speaker in {"unknown"}:
+            return "Unknown"
+        return "Unknown"
 
 
 async def _worker_loop(worker_id: int, stop_event: asyncio.Event, poll_interval_sec: float) -> None:

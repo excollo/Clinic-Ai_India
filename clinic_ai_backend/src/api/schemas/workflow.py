@@ -54,6 +54,14 @@ class PreVisitSummaryResponse(BaseModel):
     sections: PreVisitSections
 
 
+class FollowUpRemindersRunResponse(BaseModel):
+    """Result of processing scheduled follow-up WhatsApp reminders."""
+
+    sent_3d: int
+    sent_24h: int
+    skipped: int
+
+
 class DoctorAppointmentViewResponse(BaseModel):
     """Doctor view with summary and vitals context."""
 

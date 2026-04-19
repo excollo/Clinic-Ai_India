@@ -130,6 +130,7 @@ class InMemoryDatabase:
         self.vitals_forms = InMemoryCollection()
         self.patient_vitals = InMemoryCollection()
         self.clinical_notes = InMemoryCollection()
+        self.follow_up_reminders = InMemoryCollection()
         self.visit_transcription_sessions = InMemoryCollection()
 
 
