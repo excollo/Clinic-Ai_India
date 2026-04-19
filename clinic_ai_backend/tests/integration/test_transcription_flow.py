@@ -1,7 +1,7 @@
 """Integration tests for transcription V2 endpoints and worker."""
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -214,6 +214,29 @@ def test_visit_transcription_status_after_upload(
     body = response.json()
     assert body["status"] == "queued"
     assert "enqueued_at" in body
+
+
+def test_visit_transcription_status_processing_naive_mongo_datetimes(app_client, fake_db) -> None:
+    """Processing age must tolerate naive UTC datetimes (common BSON decode); must not 500."""
+    aware = datetime.now(timezone.utc)
+    naive_started = aware.replace(tzinfo=None)
+    naive_poll = (aware - timedelta(minutes=1)).replace(tzinfo=None)
+    fake_db.visit_transcription_sessions.insert_one(
+        {
+            "patient_id": "p-naive",
+            "visit_id": "v-naive",
+            "transcription_status": "processing",
+            "started_at": naive_started,
+            "last_poll_at": naive_poll,
+            "transcript": None,
+            "job_id": "j1",
+        }
+    )
+    response = app_client.get("/notes/transcribe/status/p-naive/v-naive")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "processing"
+    assert "progress" in (body.get("message") or "").lower()
 
 
 def test_visit_dialogue_returns_202_while_queued(
@@ -429,4 +452,4 @@ def test_worker_visit_uses_openai_structure_when_segments_are_unknown(
     result = fake_db.transcription_results.find_one({"job_id": "j10"})
     assert result is not None
     assert len(result.get("segments") or []) == 1
-    assert result["segments"][0]["speaker_label"] == "unknown"
+    assert result["segments"][0]["speaker_label"] == "patient"

@@ -1,7 +1,13 @@
 """Build structured Doctor/Patient-style turns from diarized segments."""
 from __future__ import annotations
 
+import copy
+import re
 from typing import Any
+
+_TOKEN_RE = re.compile(r"[a-z0-9]+")
+# Below this overlap (segment recall), keep Azure as unknown rather than forcing a role.
+_MIN_SPEAKER_ALIGNMENT_OVERLAP = 0.08
 
 
 def segments_to_structured_dialogue(segments: list[dict[str, Any]]) -> list[dict[str, str]]:
@@ -24,6 +30,148 @@ def segments_to_structured_dialogue(segments: list[dict[str, Any]]) -> list[dict
         else:
             out.append({role: text})
     return out
+
+
+def _token_set(text: str) -> set[str]:
+    return set(_TOKEN_RE.findall(text.lower()))
+
+
+def _word_overlap_ratio(segment_text: str, turn_text: str) -> float:
+    """How well segment tokens are explained by a dialogue turn (0–1), plus light substring boost."""
+    sa = _token_set(segment_text)
+    sb = _token_set(turn_text)
+    if not sa:
+        return 0.0
+    inter = len(sa & sb)
+    ratio = inter / len(sa)
+    s_norm = re.sub(r"\s+", " ", segment_text.lower()).strip()
+    t_norm = re.sub(r"\s+", " ", turn_text.lower()).strip()
+    if len(s_norm) >= 8 and len(t_norm) >= 8:
+        if s_norm in t_norm or t_norm in s_norm:
+            ratio = max(ratio, 0.42)
+    return min(1.0, ratio)
+
+
+def _flatten_structured_turns(structured_dialogue: list[dict[str, str]]) -> list[tuple[str, str]]:
+    """(speaker_slug, text) in order — slugs match `_canonical_speaker` outputs."""
+    out: list[tuple[str, str]] = []
+    for turn in structured_dialogue:
+        if not isinstance(turn, dict):
+            continue
+        for display_key, slug in (
+            ("Doctor", "doctor"),
+            ("Patient", "patient"),
+            ("Family Member", "attendant"),
+        ):
+            raw = turn.get(display_key)
+            if raw is None:
+                continue
+            text = str(raw).strip()
+            if text:
+                out.append((slug, text))
+    return out
+
+
+def align_segments_with_structured_dialogue(
+    segments: list[dict[str, Any]],
+    structured_dialogue: list[dict[str, str]],
+) -> list[dict[str, Any]]:
+    """
+    Map each STT segment to Doctor / Patient / attendant using structured dialogue from OpenAI
+    (or bundle-style turns), with monotone time-in-dialogue order.
+
+    Azure short-audio REST responses do not include per-phrase speaker ids; STT segments are
+    typically all ``unknown``. After structuring, token overlap + dynamic programming assigns roles
+    so ``transcription_results.segments`` matches API dialogue when wording overlaps enough.
+    """
+    if not segments:
+        return []
+    turns = _flatten_structured_turns(structured_dialogue)
+    if not turns:
+        return [copy.deepcopy(s) for s in segments]
+
+    turn_texts = [t[1] for t in turns]
+    m = len(turns)
+    n = len(segments)
+    ovl: list[list[float]] = []
+    for i in range(n):
+        row: list[float] = []
+        seg_text = str(segments[i].get("text") or "")
+        for j in range(m):
+            row.append(_word_overlap_ratio(seg_text, turn_texts[j]))
+        ovl.append(row)
+
+    # dp[i][j] = best score placing segments 0..i with segment i on turn j (turn index monotone).
+    dp: list[list[float]] = [[0.0] * m for _ in range(n)]
+    bp: list[list[int]] = [[0] * m for _ in range(n)]
+
+    for j in range(m):
+        dp[0][j] = ovl[0][j]
+
+    for i in range(1, n):
+        prefix_best = dp[i - 1][0]
+        prefix_k = 0
+        for j in range(m):
+            if dp[i - 1][j] >= prefix_best:
+                prefix_best = dp[i - 1][j]
+                prefix_k = j
+            dp[i][j] = ovl[i][j] + prefix_best
+            bp[i][j] = prefix_k
+
+    best_j = max(range(m), key=lambda j: dp[n - 1][j])
+    turn_idx = [0] * n
+    j = best_j
+    for i in range(n - 1, -1, -1):
+        turn_idx[i] = j
+        if i == 0:
+            break
+        j = bp[i][j]
+
+    out: list[dict[str, Any]] = []
+    for i, seg in enumerate(segments):
+        seg_out = copy.deepcopy(seg)
+        text = str(seg.get("text") or "").strip()
+        if not text:
+            seg_out["speaker_label"] = "unknown"
+            out.append(seg_out)
+            continue
+        tj = turn_idx[i]
+        score = ovl[i][tj]
+        if score < _MIN_SPEAKER_ALIGNMENT_OVERLAP:
+            seg_out["speaker_label"] = "unknown"
+        else:
+            seg_out["speaker_label"] = turns[tj][0]
+        out.append(seg_out)
+    return out
+
+
+def segment_gap_audit(segments: list[dict[str, Any]]) -> dict[str, float]:
+    """
+    Sum of per-segment (end_ms - start_ms) and max gap between consecutive segments by start_ms.
+
+    Large gaps often reflect silence or chunk stitching (wall-clock offsets), not dropped audio;
+    compare ``speech_span_s`` and ``max_segment_end`` to ``wav_duration_s`` (see long-audio doc).
+    """
+    pairs: list[tuple[int, int]] = []
+    for s in segments:
+        try:
+            a = int(s.get("start_ms", 0) or 0)
+            b = int(s.get("end_ms", 0) or 0)
+        except (TypeError, ValueError):
+            continue
+        pairs.append((a, b))
+    if not pairs:
+        return {"speech_span_s": 0.0, "max_consecutive_gap_ms": 0.0}
+    pairs.sort(key=lambda x: x[0])
+    span_ms = sum(max(0, e - st) for st, e in pairs)
+    max_gap = 0
+    for i in range(1, len(pairs)):
+        gap = max(0, pairs[i][0] - pairs[i - 1][1])
+        max_gap = max(max_gap, gap)
+    return {
+        "speech_span_s": round(span_ms / 1000.0, 3),
+        "max_consecutive_gap_ms": float(max_gap),
+    }
 
 
 def audio_duration_from_segments_ms(segments: list[dict[str, Any]]) -> float | None:

@@ -24,7 +24,9 @@ from src.application.services.dialogue_pii import scrub_dialogue_turns
 from src.application.services.structure_dialogue import structure_dialogue_from_transcript_sync
 from src.application.use_cases.generate_india_clinical_note import GenerateIndiaClinicalNoteUseCase
 from src.application.utils.transcript_dialogue import (
+    align_segments_with_structured_dialogue,
     audio_duration_from_segments_ms,
+    segment_gap_audit,
     segments_to_structured_dialogue,
 )
 from src.core.config import get_settings
@@ -119,6 +121,8 @@ class TranscriptionWorker:
                     review_ratio >= self.settings.transcription_manual_review_ratio_threshold
                 )
 
+            structured = self._visit_structured_dialogue(job, full_text=full_text, normalized=normalized)
+            segments_to_store = align_segments_with_structured_dialogue(normalized, structured)
             self.repo.save_result(
                 {
                     "job_id": job["job_id"],
@@ -128,10 +132,15 @@ class TranscriptionWorker:
                     "overall_confidence": round(avg_confidence, 4),
                     "requires_manual_review": requires_manual_review,
                     "full_transcript_text": full_text,
-                    "segments": normalized,
+                    "segments": segments_to_store,
                 }
             )
-            self._sync_visit_completed(job, full_text=full_text, normalized=normalized)
+            self._sync_visit_completed(
+                job,
+                full_text=full_text,
+                normalized=segments_to_store,
+                structured_dialogue=structured,
+            )
             self.repo.mark_completed(job_id)
             self._auto_generate_default_note(job=job)
             self._purge_stored_audio(job)
@@ -220,8 +229,9 @@ class TranscriptionWorker:
 
         Short-audio Azure Speech REST (`/speech/recognition/.../v1`) typically returns one
         `NBest` phrase with no speaker diarization — see `tests/fixtures/azure_speech_short_audio_success.json`.
-        `segments_to_structured_dialogue` then collapses unknown speakers to Patient-only turns.
-        When `OPENAI_API_KEY` is set, we restructure the full transcript so GET dialogue is useful.
+        `segments_to_structured_dialogue` collapses unknown speakers to Patient-only turns for bundle-style output.
+        When `OPENAI_API_KEY` is set, we restructure the full transcript; persisted segments are then aligned to
+        those turns via `align_segments_with_structured_dialogue` before `save_result`.
         """
         baseline = segments_to_structured_dialogue(normalized)
         if not (self.settings.openai_api_key or "").strip():
@@ -246,18 +256,18 @@ class TranscriptionWorker:
         *,
         full_text: str,
         normalized: list[dict[str, Any]],
+        structured_dialogue: list[dict[str, str]],
     ) -> None:
         visit_id = self._visit_id(job)
         if not visit_id:
             return
-        structured = self._visit_structured_dialogue(job, full_text=full_text, normalized=normalized)
         duration = audio_duration_from_segments_ms(normalized)
         word_count = len(full_text.split()) if full_text else 0
         VisitTranscriptionRepository().mark_completed(
             patient_id=str(job["patient_id"]),
             visit_id=visit_id,
             transcript=full_text,
-            structured_dialogue=structured,
+            structured_dialogue=structured_dialogue,
             word_count=word_count,
             audio_duration_seconds=duration,
         )
@@ -480,6 +490,7 @@ class TranscriptionWorker:
         segment_count: int,
         merged_segments: list[dict[str, Any]],
         use_chunked_stt: bool,
+        chunk_sec: float | None = None,
     ) -> None:
         """
         One INFO line per successful STT path: stored vs downloaded bytes, WAV duration, and STT wire volume.
@@ -509,6 +520,10 @@ class TranscriptionWorker:
             except (TypeError, ValueError):
                 continue
         max_end_s = max_end_ms / 1000.0 if max_end_ms else None
+        gap_stats = segment_gap_audit(merged_segments)
+        wall_span_s: float | None = None
+        if use_chunked_stt and chunk_sec is not None and azure_post_count:
+            wall_span_s = round(float(azure_post_count) * float(chunk_sec), 3)
         if wav_duration_s and max_end_s and wav_duration_s > 60:
             drift = abs(max_end_s - wav_duration_s) / wav_duration_s
             if drift > 0.15:
@@ -529,7 +544,8 @@ class TranscriptionWorker:
         logger.info(
             "transcription_pipeline_integrity job_id=%s audio_id=%s stored_bytes=%s download_bytes=%s "
             "stored_eq_download=%s transcoded_wav_bytes=%s wav_duration_s=%s chunked_stt=%s azure_post_count=%s "
-            "stt_request_bytes_total=%s segments=%s max_segment_end_s=%s",
+            "stt_request_bytes_total=%s segments=%s max_segment_end_s=%s speech_span_s=%s max_consecutive_gap_ms=%s "
+            "chunk_wall_span_s=%s",
             job.get("job_id"),
             audio_doc.get("audio_id"),
             meta_int if meta_int is not None else raw_meta,
@@ -542,7 +558,21 @@ class TranscriptionWorker:
             stt_request_bytes_total,
             segment_count,
             round(max_end_s, 3) if max_end_s else None,
+            gap_stats["speech_span_s"],
+            int(gap_stats["max_consecutive_gap_ms"]),
+            wall_span_s,
         )
+        if self.settings.transcription_debug_bytes and use_chunked_stt and wall_span_s is not None and wav_duration_s:
+            logger.info(
+                "transcription_chunk_wall_audit job_id=%s chunk_sec=%s azure_post_count=%s chunk_wall_span_s=%s "
+                "wav_duration_s=%s (STT phrase times are sparse; wall offsets span full file — large inter-phrase "
+                "gaps do not imply dropped chunks)",
+                job.get("job_id"),
+                round(float(chunk_sec), 3) if chunk_sec is not None else None,
+                azure_post_count,
+                wall_span_s,
+                round(wav_duration_s, 3),
+            )
 
     def _call_azure_speech(self, *, job: dict, audio_doc: dict) -> dict:
         if not self.settings.azure_speech_key:
@@ -645,6 +675,7 @@ class TranscriptionWorker:
                     segment_count=len(merged_segments),
                     merged_segments=merged_segments,
                     use_chunked_stt=True,
+                    chunk_sec=chunk_sec,
                 )
                 return {"language_detected": merged_lang, "segments": merged_segments}
             self._raise_azure_recognition_failure(

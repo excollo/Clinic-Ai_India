@@ -30,12 +30,17 @@ router = APIRouter(prefix="/notes", tags=["Transcription"])
 _upload_log = logging.getLogger(__name__)
 
 
+def _as_utc_aware(value: datetime) -> datetime:
+    """Mongo/BSON often returns naive UTC datetimes; normalize for arithmetic with aware UTC."""
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
 def _iso_utc(value: datetime | None) -> str | None:
     if value is None:
         return None
-    if value.tzinfo is None:
-        value = value.replace(tzinfo=timezone.utc)
-    return value.astimezone(timezone.utc).isoformat()
+    return _as_utc_aware(value).isoformat()
 
 
 @router.post("/transcribe", response_model=TranscriptionUploadAcceptedResponse, status_code=202)
@@ -186,14 +191,15 @@ def get_visit_transcription_status(patient_id: str, visit_id: str) -> dict:
 
     started_at = session.get("started_at")
     last_poll_at = session.get("last_poll_at")
+    started_at_utc = _as_utc_aware(started_at) if isinstance(started_at, datetime) else None
     is_stale = False
     age_minutes = 0.0
-    if transcription_status == "processing" and isinstance(started_at, datetime):
-        age_minutes = (now - started_at).total_seconds() / 60.0
+    if transcription_status == "processing" and started_at_utc is not None:
+        age_minutes = (now - started_at_utc).total_seconds() / 60.0
         if last_poll_at is None:
             last_poll_age_minutes = age_minutes
         elif isinstance(last_poll_at, datetime):
-            last_poll_age_minutes = (now - last_poll_at).total_seconds() / 60.0
+            last_poll_age_minutes = (now - _as_utc_aware(last_poll_at)).total_seconds() / 60.0
         else:
             last_poll_age_minutes = age_minutes
         if age_minutes > 30 and (last_poll_age_minutes > 20 or last_poll_at is None):
@@ -226,8 +232,8 @@ def get_visit_transcription_status(patient_id: str, visit_id: str) -> dict:
             f"Transcription appears stuck (processing for {age_minutes:.1f} minutes). May need manual intervention."
             if is_stale
             else (
-                f"Transcription in progress (running for {(now - started_at).total_seconds():.0f} seconds)"
-                if isinstance(started_at, datetime)
+                f"Transcription in progress (running for {(now - started_at_utc).total_seconds():.0f} seconds)"
+                if started_at_utc is not None
                 else "Transcription in progress"
             )
         )

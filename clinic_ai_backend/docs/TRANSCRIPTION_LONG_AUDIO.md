@@ -1,5 +1,19 @@
 # Long audio transcription (10+ minutes)
 
+## Speaker labels on `transcription_results.segments`
+
+### Root cause (Azure short-audio REST)
+
+The worker calls **Speech-to-text REST API for short audio** (`/speech/recognition/{interactive|conversation}/cognitiveservices/v1?format=detailed`). Microsoft’s JSON for this path is essentially **NBest + timing** (`Offset` / `Duration` in 100-ns ticks, `Display` / `Lexical` text). There is **no per-phrase `SpeakerId` or channel** in the payloads we parse (see `tests/fixtures/azure_speech_short_audio_success.json` and `TranscriptionWorker._normalize_azure_response`).
+
+So STT segments are stored with `speaker_label: "unknown"` at the Azure layer. **Doctor / Patient** in the product comes from **OpenAI structuring** (`structure_dialogue_from_transcript_sync`) on the full transcript.
+
+### Fix implemented (Option 1)
+
+After structured dialogue is produced, we run a **deterministic alignment** (`align_segments_with_structured_dialogue` in `src/application/utils/transcript_dialogue.py`): monotone dynamic programming maps each segment’s text to the best-matching dialogue turn by **token overlap**, with `speaker_label` set to `doctor` / `patient` / `attendant` when overlap ≥ a small threshold, else `unknown`. Persisted `transcription_results.segments` then align with `structured_dialogue` when wording overlaps.
+
+**Not chosen here (Option 2):** Azure **batch** transcription with diarization — higher quality, larger operational change (blob SAS, polling, SpeakerId → role mapping).
+
 ## Root cause (fixed)
 
 The worker called Azure **Speech-to-text REST API for short audio**:
@@ -18,7 +32,8 @@ Implementation: `src/workers/transcription_worker.py` — `_candidate_azure_spee
 4. **FFmpeg** transcodes to **16 kHz mono PCM WAV** when `ffmpeg` is on `PATH`.
 5. If WAV duration **>** `TRANSCRIPTION_SHORT_AUDIO_MAX_SECONDS` (default **55**) and **ffmpeg** is installed, the WAV is **split in time** into chunks of `TRANSCRIPTION_CHUNK_SECONDS` (default **50** seconds).
 6. Each chunk is POSTed to the same short-audio REST API; transcripts are **stitched** with **wall-clock** millisecond offsets (`chunk_index * chunk_sec * 1000`), so segment timelines span the full visit (fixes under-reported `audio_duration_seconds` when a chunk had speech only at the start).
-7. After a successful STT path, the worker always emits one **`transcription_pipeline_integrity`** INFO line: stored vs download bytes, transcoded WAV size, `wav_duration_s`, chunked flag, Azure POST count, **sum of HTTP body bytes** sent to Azure, segment count, and `max_segment_end_s`.
+7. After a successful STT path, the worker always emits one **`transcription_pipeline_integrity`** INFO line: stored vs download bytes, transcoded WAV size, `wav_duration_s`, chunked flag, Azure POST count, **sum of HTTP body bytes** sent to Azure, segment count, `max_segment_end_s`, **`speech_span_s`** (sum of phrase durations), **`max_consecutive_gap_ms`** (largest gap between consecutive phrase intervals by `start_ms`), and **`chunk_wall_span_s`** when chunked (`azure_post_count × chunk_sec`, i.e. full wall time sent to STT).
+8. With **`TRANSCRIPTION_DEBUG_BYTES=true`** and chunked STT, an extra **`transcription_chunk_wall_audit`** line states that **large gaps between phrase `start_ms` values are expected** when the next phrase is in a later time chunk: offsets are **wall-clock** (`chunk_index × chunk_sec × 1000`), while Azure only returns times **inside** each chunk. A jump from ~17 s to ~50 s usually means **silence until the next chunk boundary**, not dropped audio. Compare `chunk_wall_span_s` to `wav_duration_s` and `azure_post_count` to `ceil(wav_duration / TRANSCRIPTION_CHUNK_SECONDS)` to confirm every slice was posted.
 
 Without ffmpeg, long files still **truncate**; the worker logs a warning.
 
@@ -69,6 +84,7 @@ Use a **non-PHI** clip (silence + TTS, or a licensed generic consultation sample
 
 ## Automated tests
 
+- `tests/unit/test_segment_dialogue_alignment.py` — segment `speaker_label` alignment to structured Doctor/Patient turns.
 - `tests/unit/test_transcription_wav_chunking.py` — PCM duration parsing, ffmpeg split, **long silent WAV chunk duration sum** (regression for partial coverage).
 - `tests/unit/test_structure_dialogue_chunking.py` — lossless chunking of long text; mocked multi-chunk OpenAI **ordered merge**.
 - `tests/unit/test_dialogue_pii.py` — vitals/doses preserved; phone/email/SSN-style scrubbed.
