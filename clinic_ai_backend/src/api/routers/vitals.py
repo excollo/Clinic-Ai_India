@@ -1,10 +1,11 @@
 """Vitals routes module."""
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Body, HTTPException
 
 from src.api.schemas.vitals import (
     LatestVitalsResponse,
     PatientLookupRequest,
     PatientLookupResponse,
+    VITALS_SUBMIT_OPENAPI_EXAMPLES,
     VitalsFormResponse,
     VitalsSubmitRequest,
     VitalsSubmitResponse,
@@ -40,8 +41,13 @@ def generate_vitals_form(patient_id: str, visit_id: str) -> VitalsFormResponse:
 
 
 @router.post("/submit", response_model=VitalsSubmitResponse)
-def submit_vitals(payload: VitalsSubmitRequest) -> VitalsSubmitResponse:
-    """Submit vitals values captured by hospital staff."""
+def submit_vitals(
+    payload: VitalsSubmitRequest = Body(..., openapi_examples=VITALS_SUBMIT_OPENAPI_EXAMPLES),
+) -> VitalsSubmitResponse:
+    """Submit vitals values captured by hospital staff.
+
+    Keys in `values` come from `POST .../generate-form` response `fields` for that visit (not a global template).
+    """
     try:
         doc = StoreVitalsUseCase().submit_vitals(
             patient_id=payload.patient_id,

@@ -52,12 +52,63 @@ class VitalsValueEntry(BaseModel):
     key: str = Field(
         min_length=1,
         max_length=64,
-        description="Machine key from POST /vitals/generate-form/{patient_id}/{visit_id} → fields[].key",
-        examples=["temperature_c", "blood_pressure"],
+        description=(
+            "Exact `fields[].key` from the latest vitals form for this visit. "
+            "When vitals are needed, the form always includes `body_weight_kg` and `blood_pressure_mmhg`; "
+            "additional keys are illness-specific (up to three)."
+        ),
+        examples=["body_weight_kg", "blood_pressure_mmhg", "temperature_c"],
     )
     value: str | int | float | bool | None = Field(
-        description="Staff-entered value (number, text such as 120/80, boolean, etc.)",
+        description="Staff-entered value (number, text such as 120/80 for BP, boolean, etc.)",
     )
+
+
+VITALS_SUBMIT_EXAMPLE_FULL = {
+    "patient_id": "00000000-0000-4000-8000-000000000001",
+    "visit_id": "00000000-0000-4000-8000-000000000002",
+    "form_id": "00000000-0000-4000-8000-000000000003",
+    "staff_name": "Nurse Patel",
+    "values": [
+        {"key": "body_weight_kg", "value": 68.5},
+        {"key": "blood_pressure_mmhg", "value": "122/78"},
+        {"key": "temperature_c", "value": 37.0},
+    ],
+}
+
+VITALS_SUBMIT_EXAMPLE_FIXED_PLUS_PAIN = {
+    **VITALS_SUBMIT_EXAMPLE_FULL,
+    "values": [
+        {"key": "body_weight_kg", "value": 72.0},
+        {"key": "blood_pressure_mmhg", "value": "118/76"},
+        {"key": "pain_score_0_10", "value": 5},
+    ],
+}
+
+VITALS_SUBMIT_EXAMPLE_FIXED_ONLY = {
+    **VITALS_SUBMIT_EXAMPLE_FULL,
+    "values": [
+        {"key": "body_weight_kg", "value": 65.0},
+        {"key": "blood_pressure_mmhg", "value": "128/84"},
+    ],
+}
+
+# Swagger: POST /vitals/submit — doctors copy keys from generate-form `fields`, then fill `value` only.
+VITALS_SUBMIT_OPENAPI_EXAMPLES: dict[str, dict[str, Any]] = {
+    "fixed_plus_contextual": {
+        "summary": "Weight + BP + one illness-specific vital",
+        "description": "Use `form_id` and each `key` from `POST /vitals/generate-form/...` response `fields` for that patient.",
+        "value": VITALS_SUBMIT_EXAMPLE_FULL,
+    },
+    "fixed_plus_different_extra": {
+        "summary": "Weight + BP + different extra (keys vary by complaint)",
+        "value": VITALS_SUBMIT_EXAMPLE_FIXED_PLUS_PAIN,
+    },
+    "fixed_only": {
+        "summary": "Only common vitals when the form had no extra rows",
+        "value": VITALS_SUBMIT_EXAMPLE_FIXED_ONLY,
+    },
+}
 
 
 class VitalsSubmitRequest(BaseModel):
@@ -67,11 +118,19 @@ class VitalsSubmitRequest(BaseModel):
     visit_id: str
     form_id: str | None = Field(
         default=None,
-        description="Latest form_id from generate-form; required to validate keys against that form.",
+        description="Copy `form_id` from POST /vitals/generate-form/{patient_id}/{visit_id} for this visit.",
     )
     staff_name: str = Field(min_length=1, max_length=120, description="Staff member capturing vitals")
     values: list[VitalsValueEntry] = Field(
-        description="One object per vital; only use keys returned on the vitals form for this visit.",
+        description=(
+            "One `{key, value}` per row in `fields` from generate-form for this `form_id`. "
+            "Submit a value for each **required** field (typically `body_weight_kg`, `blood_pressure_mmhg`, "
+            "plus any illness-specific keys the form lists). Keys are not global—mirror the form for this visit."
+        ),
+        examples=[
+            VITALS_SUBMIT_EXAMPLE_FULL["values"],
+            VITALS_SUBMIT_EXAMPLE_FIXED_ONLY["values"],
+        ],
     )
 
     @model_validator(mode="before")
