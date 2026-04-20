@@ -28,7 +28,7 @@ class Settings:
     whatsapp_intake_template_lang_en: str = os.getenv("WHATSAPP_INTAKE_TEMPLATE_LANG_EN", "en_US")
     whatsapp_intake_template_lang_hi: str = os.getenv("WHATSAPP_INTAKE_TEMPLATE_LANG_HI", "hi")
     whatsapp_intake_template_param_count: int = int(os.getenv("WHATSAPP_INTAKE_TEMPLATE_PARAM_COUNT", "1"))
-    # Follow-up reminders (post-visit next visit). Defaults to intake template for hello_world-style testing.
+    # Follow-up reminders (post-visit next visit). Defaults to intake template for opening_msg-style testing.
     whatsapp_followup_template_name: str = os.getenv("WHATSAPP_FOLLOWUP_TEMPLATE_NAME", "")
     whatsapp_followup_template_lang_en: str = os.getenv(
         "WHATSAPP_FOLLOWUP_TEMPLATE_LANG_EN", os.getenv("WHATSAPP_INTAKE_TEMPLATE_LANG_EN", "en_US")

@@ -22,7 +22,7 @@ def send_post_visit_summary_whatsapp(*, patient: dict, whatsapp_payload: str) ->
     Send the generated post-visit text (emoji summary line) on its own template channel.
 
     Uses WHATSAPP_POST_VISIT_TEMPLATE_NAME when set; otherwise WHATSAPP_INTAKE_TEMPLATE_NAME
-    for sandbox (e.g. hello_world). Follow-up reminder wording uses WHATSAPP_FOLLOWUP_* only
+    for sandbox (e.g. opening_msg). Follow-up reminder wording uses WHATSAPP_FOLLOWUP_* only
     via ``send_immediate_follow_up_template_whatsapp`` — not mixed into this call.
     """
     settings = get_settings()

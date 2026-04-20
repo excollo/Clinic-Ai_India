@@ -289,11 +289,11 @@ def test_generate_india_with_follow_up_date_sets_payload_and_context(app_client,
 
 
 def test_follow_up_reminders_run_sends_meta_template(app_client, patched_db, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Cron endpoint sends WhatsApp template at T-3d (uses intake/hello_world template when follow-up name unset)."""
+    """Cron endpoint sends WhatsApp template at T-3d (uses intake/opening_msg template when follow-up name unset)."""
     settings = config_module.get_settings()
     settings.whatsapp_access_token = "test-token"
     settings.whatsapp_phone_number_id = "test-phone-id"
-    settings.whatsapp_intake_template_name = "hello_world"
+    settings.whatsapp_intake_template_name = "opening_msg"
     settings.whatsapp_followup_template_name = ""
     monkeypatch.setattr("src.core.config.get_settings", lambda: settings)
 
@@ -341,7 +341,7 @@ def test_follow_up_reminders_run_sends_meta_template(app_client, patched_db, mon
     assert body["sent_3d"] == 1
     assert body["sent_24h"] == 0
     assert len(sent) == 1
-    assert sent[0]["template_name"] == "hello_world"
+    assert sent[0]["template_name"] == "opening_msg"
     assert sent[0]["to"] == "919876543210"
 
     updated = patched_db.follow_up_reminders.find_one({"reminder_id": "r-fu-1"})
@@ -353,7 +353,7 @@ def test_follow_up_reminders_run_sends_day_before_reminder(app_client, patched_d
     settings = config_module.get_settings()
     settings.whatsapp_access_token = "test-token"
     settings.whatsapp_phone_number_id = "test-phone-id"
-    settings.whatsapp_intake_template_name = "hello_world"
+    settings.whatsapp_intake_template_name = "opening_msg"
     settings.whatsapp_followup_template_name = ""
     monkeypatch.setattr("src.core.config.get_settings", lambda: settings)
 
@@ -413,7 +413,7 @@ def test_follow_up_reminders_run_fetches_patient_phone_when_to_number_missing(
     settings = config_module.get_settings()
     settings.whatsapp_access_token = "test-token"
     settings.whatsapp_phone_number_id = "test-phone-id"
-    settings.whatsapp_intake_template_name = "hello_world"
+    settings.whatsapp_intake_template_name = "opening_msg"
     settings.whatsapp_followup_template_name = ""
     monkeypatch.setattr("src.core.config.get_settings", lambda: settings)
 

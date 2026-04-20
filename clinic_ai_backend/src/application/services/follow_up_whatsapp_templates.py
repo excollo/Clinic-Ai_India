@@ -7,7 +7,7 @@ from src.core.config import Settings
 
 
 def resolve_follow_up_template_name(settings: Settings) -> str | None:
-    """Follow-up / reminder channel: dedicated follow-up template, else intake (e.g. hello_world)."""
+    """Follow-up / reminder channel: dedicated follow-up template, else intake (e.g. opening_msg)."""
     name = (settings.whatsapp_followup_template_name or "").strip()
     if name:
         return name
@@ -27,7 +27,7 @@ def follow_up_template_body_values(
     next_visit_at: datetime,
     follow_up_text: str,
 ) -> list[str]:
-    """One body parameter for templates like hello_world (single {{1}})."""
+    """One body parameter for templates like opening_msg (single {{1}})."""
     date_s = next_visit_at.strftime("%Y-%m-%d")
     if reminder_kind in {"24h", "1d"}:
         return [f"Follow-up visit tomorrow ({date_s}). {follow_up_text}".strip()[:900]]
