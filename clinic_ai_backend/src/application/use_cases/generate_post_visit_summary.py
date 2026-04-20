@@ -106,11 +106,19 @@ class GeneratePostVisitSummaryUseCase:
             preferred_language=resolved_language,
         )
         send_post_visit_summary_whatsapp(patient=patient, whatsapp_payload=whatsapp_payload)
-        send_immediate_follow_up_template_whatsapp(
+        immediate_ok = send_immediate_follow_up_template_whatsapp(
             patient=patient,
             payload=payload,
             preferred_language=resolved_language,
         )
+        if immediate_ok:
+            self.db.follow_up_reminders.update_one(
+                {
+                    "patient_id": patient_id,
+                    "visit_id": str(created.get("visit_id") or ""),
+                },
+                {"$set": {"remind_immediate_sent_at": _utc_now()}},
+            )
         return created
 
     def _resolve_transcription_job(

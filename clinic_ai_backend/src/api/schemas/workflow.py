@@ -57,9 +57,11 @@ class PreVisitSummaryResponse(BaseModel):
 class FollowUpRemindersRunResponse(BaseModel):
     """Result of processing scheduled follow-up WhatsApp reminders."""
 
+    sent_immediate: int = 0
     sent_3d: int
     sent_24h: int
     skipped: int
+    debug: dict[str, int] | None = None
 
 
 class DoctorAppointmentViewResponse(BaseModel):

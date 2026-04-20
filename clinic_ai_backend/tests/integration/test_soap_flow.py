@@ -407,6 +407,71 @@ def test_follow_up_reminders_run_sends_day_before_reminder(app_client, patched_d
     assert updated.get("remind_24h_sent_at") is not None
 
 
+def test_follow_up_reminders_run_fetches_patient_phone_when_to_number_missing(
+    app_client, patched_db, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    settings = config_module.get_settings()
+    settings.whatsapp_access_token = "test-token"
+    settings.whatsapp_phone_number_id = "test-phone-id"
+    settings.whatsapp_intake_template_name = "hello_world"
+    settings.whatsapp_followup_template_name = ""
+    monkeypatch.setattr("src.core.config.get_settings", lambda: settings)
+
+    sent: list[dict] = []
+
+    def _stub_send_template(_self, *, to_number: str, template_name: str, language_code: str, body_values=None) -> None:
+        sent.append(
+            {"to": to_number, "template_name": template_name, "language_code": language_code, "body_values": body_values}
+        )
+
+    monkeypatch.setattr(
+        "src.application.use_cases.process_follow_up_reminders.MetaWhatsAppClient.send_template",
+        _stub_send_template,
+    )
+
+    patched_db.patients.insert_one(
+        {
+            "patient_id": "p-fu-phone",
+            "name": "Rahul",
+            "phone_number": "+91 98765 43210",
+        }
+    )
+    nv = datetime(2030, 6, 20, 9, 0, tzinfo=timezone.utc)
+    patched_db.follow_up_reminders.insert_one(
+        {
+            "reminder_id": "r-fu-phone",
+            "patient_id": "p-fu-phone",
+            "visit_id": "v-fu-phone",
+            "note_id": "n-fu-phone",
+            "next_visit_at": nv,
+            "to_number": "",
+            "preferred_language": "en",
+            "follow_up_text": "Bring inhaler",
+            "remind_3d_sent_at": None,
+            "remind_24h_sent_at": None,
+            "created_at": nv - timedelta(days=10),
+            "updated_at": nv - timedelta(days=10),
+        }
+    )
+
+    fixed_now = datetime(2030, 6, 18, 10, 0, tzinfo=timezone.utc)
+    orig_execute = ProcessFollowUpRemindersUseCase.execute
+
+    def _execute_with_fixed_now(self, *, db, now=None):
+        return orig_execute(self, db=db, now=fixed_now)
+
+    monkeypatch.setattr(ProcessFollowUpRemindersUseCase, "execute", _execute_with_fixed_now)
+
+    response = app_client.post("/workflow/follow-up-reminders/run")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["sent_3d"] == 1
+    assert len(sent) == 1
+    assert sent[0]["to"] == "919876543210"
+    updated = patched_db.follow_up_reminders.find_one({"reminder_id": "r-fu-phone"})
+    assert updated.get("to_number") == "919876543210"
+
+
 def test_follow_up_reminders_run_requires_cron_secret_when_configured(
     app_client, patched_db, monkeypatch: pytest.MonkeyPatch
 ) -> None:

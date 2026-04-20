@@ -68,6 +68,7 @@ def schedule_follow_up_after_post_visit(
         "to_number": to_number,
         "preferred_language": preferred_language,
         "follow_up_text": follow_up_text,
+        "remind_immediate_sent_at": None,
         "remind_3d_sent_at": None,
         "remind_24h_sent_at": None,
         "created_at": created_at,

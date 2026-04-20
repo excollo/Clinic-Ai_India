@@ -437,6 +437,9 @@ class TranscriptionWorker:
         """
         last_404: HTTPError | None = None
         last_raw: dict | None = None
+        best_normalized: dict | None = None
+        best_status: int | None = None
+        best_words = -1
         http_timeout = max(30, int(self.settings.transcription_timeout_sec))
         for locale in self._candidate_locales(primary_locale):
             for endpoint in self._candidate_azure_speech_endpoints(locale):
@@ -456,8 +459,13 @@ class TranscriptionWorker:
                     if not isinstance(raw, dict):
                         continue
                     normalized = self._normalize_azure_response(raw, locale)
-                    if normalized.get("segments"):
-                        return normalized, last_404, last_raw, int(status or 200), None
+                    segs = normalized.get("segments") or []
+                    if segs:
+                        words = sum(len(str(s.get("text", "")).split()) for s in segs)
+                        if words > best_words:
+                            best_words = words
+                            best_normalized = normalized
+                            best_status = int(status or 200)
                     last_raw = raw if isinstance(raw, dict) else last_raw
                 except HTTPError as exc:
                     err_body = ""
@@ -473,6 +481,8 @@ class TranscriptionWorker:
                     raise RuntimeError(
                         f"Azure Speech HTTP {exc.code} for short-audio STT: {err_body[:300]}"
                     ) from exc
+        if best_normalized and (best_normalized.get("segments") or []):
+            return best_normalized, last_404, last_raw, best_status, None
         return None, last_404, last_raw, None, "exhausted_no_segments"
 
     def _stt_recognize_chunk_with_retries(

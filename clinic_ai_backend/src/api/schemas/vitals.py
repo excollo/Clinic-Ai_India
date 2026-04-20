@@ -57,7 +57,7 @@ class VitalsValueEntry(BaseModel):
             "When vitals are needed, the form always includes `body_weight_kg` and `blood_pressure_mmhg`; "
             "additional keys are illness-specific (up to three)."
         ),
-        examples=["body_weight_kg", "blood_pressure_mmhg", "temperature_c"],
+        examples=["body_weight_kg", "blood_pressure_mmhg", "dynamic_contextual_key_from_generate_form"],
     )
     value: str | int | float | bool | None = Field(
         description="Staff-entered value (number, text such as 120/80 for BP, boolean, etc.)",
@@ -65,14 +65,14 @@ class VitalsValueEntry(BaseModel):
 
 
 VITALS_SUBMIT_EXAMPLE_FULL = {
-    "patient_id": "00000000-0000-4000-8000-000000000001",
-    "visit_id": "00000000-0000-4000-8000-000000000002",
-    "form_id": "00000000-0000-4000-8000-000000000003",
-    "staff_name": "Nurse Patel",
+    "patient_id": "string",
+    "visit_id": "string",
+    "form_id": "string",
+    "staff_name": "string",
     "values": [
         {"key": "body_weight_kg", "value": 68.5},
         {"key": "blood_pressure_mmhg", "value": "122/78"},
-        {"key": "temperature_c", "value": 37.0},
+        {"key": "dynamic_contextual_key_from_generate_form", "value": "string"},
     ],
 }
 
@@ -81,7 +81,7 @@ VITALS_SUBMIT_EXAMPLE_FIXED_PLUS_PAIN = {
     "values": [
         {"key": "body_weight_kg", "value": 72.0},
         {"key": "blood_pressure_mmhg", "value": "118/76"},
-        {"key": "pain_score_0_10", "value": 5},
+        {"key": "another_dynamic_key_from_generate_form", "value": "string"},
     ],
 }
 
@@ -97,7 +97,7 @@ VITALS_SUBMIT_EXAMPLE_FIXED_ONLY = {
 VITALS_SUBMIT_OPENAPI_EXAMPLES: dict[str, dict[str, Any]] = {
     "fixed_plus_contextual": {
         "summary": "Weight + BP + one illness-specific vital",
-        "description": "Use `form_id` and each `key` from `POST /vitals/generate-form/...` response `fields` for that patient.",
+        "description": "Use `form_id` and exact keys from `POST /vitals/generate-form/...` response `fields` for that patient.",
         "value": VITALS_SUBMIT_EXAMPLE_FULL,
     },
     "fixed_plus_different_extra": {
@@ -107,6 +107,11 @@ VITALS_SUBMIT_OPENAPI_EXAMPLES: dict[str, dict[str, Any]] = {
     "fixed_only": {
         "summary": "Only common vitals when the form had no extra rows",
         "value": VITALS_SUBMIT_EXAMPLE_FIXED_ONLY,
+    },
+    "recommended_dynamic_flow": {
+        "summary": "Recommended: call submit-template for exact keys",
+        "description": "Use GET /vitals/submit-template/{patient_id}/{visit_id} to get all required keys (dynamic per visit), then copy into POST /vitals/submit.",
+        "value": VITALS_SUBMIT_EXAMPLE_FULL,
     },
 }
 
