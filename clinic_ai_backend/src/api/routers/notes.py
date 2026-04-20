@@ -21,7 +21,6 @@ def generate_default_note(request: NoteGenerateRequest) -> NoteGenerateResponse:
     return _generate_by_type(note_type=note_type, request=request)
 
 
-@router.post("/india", response_model=NoteGenerateResponse)
 def generate_india_note(request: NoteGenerateRequest) -> NoteGenerateResponse:
     """Generate India clinical note explicitly."""
     doc = GenerateIndiaClinicalNoteUseCase().execute(
@@ -34,7 +33,6 @@ def generate_india_note(request: NoteGenerateRequest) -> NoteGenerateResponse:
     return NoteGenerateResponse(**doc)
 
 
-@router.post("/soap", response_model=NoteGenerateResponse)
 def generate_soap_note(request: NoteGenerateRequest) -> NoteGenerateResponse:
     """Generate legacy SOAP note explicitly."""
     try:

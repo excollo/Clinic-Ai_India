@@ -17,7 +17,6 @@ from src.adapters.db.mongo.repositories.visit_transcription_repository import Vi
 from src.adapters.external.queue.producer import TranscriptionQueueProducer
 from src.adapters.external.storage.object_storage import TranscriptionAudioStore
 from src.api.schemas.audio import (
-    NoiseEnvironment,
     SpeakerMode,
     TranscriptionUploadAcceptedResponse,
 )
@@ -48,10 +47,8 @@ async def upload_transcription_audio(
     patient_id: str = Form(...),
     visit_id: str = Form(...),
     audio_file: UploadFile = File(...),
-    noise_environment: NoiseEnvironment = Form(default="quiet_clinic"),
     language_mix: str = Form(default="en"),
     speaker_mode: SpeakerMode = Form(default="two_speakers"),
-    language: str | None = Form(default=None),
 ) -> TranscriptionUploadAcceptedResponse:
     """Upload audio, create job and enqueue async processing (visit session when visit_id is set)."""
     db = get_database()
@@ -96,7 +93,9 @@ async def upload_transcription_audio(
         mime_type=content_type or "application/octet-stream",
     )
 
-    effective_language = _normalize_language_mix(language if (language or "").strip() else language_mix)
+    effective_language = _normalize_language_mix(language_mix)
+    # Kept for audit consistency in stored docs; no longer user-configurable in API form.
+    noise_environment = "quiet_clinic"
 
     repo = AudioRepository()
     repo.create_audio_file(
