@@ -204,7 +204,8 @@ class OpenAIQuestionClient:
             system_role=(
                 "You decide if vitals are needed and output strict JSON only. "
                 "Body weight and blood pressure are always collected by the system when vitals are needed. "
-                "You choose zero to three additional fields only where intake/pre-visit justify them — do not pad to three."
+                "You choose zero to three additional fields only where intake/pre-visit justify them — do not pad to three. "
+                "Contextual fields must be numeric clinical readings (field_type=number), not symptom narratives."
             ),
         )
         result = json.loads(content)

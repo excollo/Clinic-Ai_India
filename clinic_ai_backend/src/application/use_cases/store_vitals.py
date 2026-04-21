@@ -135,7 +135,7 @@ class StoreVitalsUseCase:
 
     @staticmethod
     def _sanitize_contextual_vitals_fields(fields: Any, *, max_count: int = _MAX_CONTEXTUAL_VITAL_FIELDS) -> list[dict[str, Any]]:
-        """Validated illness-specific vitals only; omits weight/BP (fixed separately); hard cap ``max_count``."""
+        """Validated illness-specific vitals only; numeric readings only; omits weight/BP; hard cap ``max_count``."""
         if not isinstance(fields, list):
             return []
         out: list[dict[str, Any]] = []
@@ -152,9 +152,10 @@ class StoreVitalsUseCase:
             if key in _CONTEXTUAL_EXCLUDE_KEYS or key in seen:
                 continue
             seen.add(key)
-            ft = str(raw.get("field_type", "text")).strip().lower()
-            if ft not in _ALLOWED_FIELD_TYPES:
-                ft = "text"
+            ft = str(raw.get("field_type", "number")).strip().lower()
+            # Contextual vitals must be measurable readings; discard non-numeric suggestions.
+            if ft != "number":
+                continue
             label = str(raw.get("label", key)).strip() or key
             unit = raw.get("unit")
             unit_out: str | None

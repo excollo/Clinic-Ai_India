@@ -6,7 +6,7 @@ Decide whether a vitals form is needed for this patient and, if needed, generate
 Input:
 {{context_json}}
 
-Read the patient's name, age, gender, language, intake Q&A, chief-complaint text, and pre-visit sections. Every visit is different: your field list MUST follow the presenting problem (e.g. skin rash → morphology/area/itch scale; knee injury → weight-bearing pain, ROM, swelling; cough → SpO2 if hypoxia suggested, respiratory rate only if relevant; UTI → dysuria frequency, flank pain; headache → neuro red flags as yes/no, not a full vitals panel).
+Read the patient's name, age, gender, language, intake Q&A, chief-complaint text, and pre-visit sections. Every visit is different: your field list MUST follow the presenting problem and include only measurable numeric readings (e.g. rash itch score 0-10 or lesion count; knee injury pain score/ROM angle; cough SpO2/respiratory rate only if relevant; UTI pain score or urine frequency count).
 
 Rules:
 1) Return only valid JSON object (no markdown).
@@ -21,7 +21,7 @@ Rules:
    - Each contextual field must be justified by chief complaint and intake (e.g. rash visit → different extras than cough visit). Do NOT default to a generic emergency panel (temperature_c, heart_rate, respiratory_rate) unless intake/pre-visit clearly supports those (e.g. explicit fever + systemic symptoms, sepsis concern, chest pain, severe dyspnoea).
    - Each field's "reason" must explicitly tie to a phrase or theme from intake or pre-visit (not generic boilerplate).
 5) Do not diagnose or prescribe treatment.
-6) field_type must be one of: number, text, boolean, select.
+6) field_type must always be "number" for contextual fields (vitals are numeric readings).
 7) Each field object must include: key (snake_case, unique), label, field_type, unit (string or null), required, reason.
 8) Prefer visit-specific keys (e.g. pain_score_0_10, rash_photo_url, spo2_percent) when the story warrants them — never duplicate weight or blood pressure (handled outside this list).
 

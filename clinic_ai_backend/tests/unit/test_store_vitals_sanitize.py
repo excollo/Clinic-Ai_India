@@ -67,6 +67,17 @@ def test_contextual_vitals_llm_can_return_fewer_than_three() -> None:
     assert out[0]["key"] == "pain_score_0_10"
 
 
+def test_contextual_vitals_drops_non_numeric_fields_dynamically() -> None:
+    raw = [
+        {"key": "pain_score_0_10", "label": "Pain", "field_type": "number", "unit": None, "required": True, "reason": "injury"},
+        {"key": "associated_symptoms", "label": "Associated symptoms", "field_type": "text", "unit": None, "required": True, "reason": "narrative"},
+        {"key": "red_flag_present", "label": "Red flags", "field_type": "boolean", "unit": None, "required": True, "reason": "screening"},
+    ]
+    out = StoreVitalsUseCase._sanitize_contextual_vitals_fields(raw, max_count=3)
+    assert [f["key"] for f in out] == ["pain_score_0_10"]
+    assert all(f["field_type"] == "number" for f in out)
+
+
 def test_fixed_common_vitals_prepended_order() -> None:
     fixed = StoreVitalsUseCase._fixed_common_vitals_fields()
     assert [f["key"] for f in fixed] == ["body_weight_kg", "blood_pressure_mmhg"]
