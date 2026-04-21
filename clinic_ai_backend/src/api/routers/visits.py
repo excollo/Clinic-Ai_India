@@ -8,6 +8,37 @@ from src.adapters.db.mongo.client import get_database
 router = APIRouter(prefix="/api/visits", tags=["Visits"])
 
 
+@router.get("/provider/{provider_id}/upcoming")
+def list_provider_upcoming_visits(provider_id: str) -> dict:
+    """Return provider visits from Mongo for dashboard/calendar."""
+    db = get_database()
+    now = datetime.now(timezone.utc)
+    records = list(
+        db.visits.find({"provider_id": provider_id, "status": {"$ne": "cancelled"}}, {"_id": 0}).sort("scheduled_start", 1)
+    )
+
+    appointments: list[dict] = []
+    for visit in records:
+        patient_id = str(visit.get("patient_id") or "")
+        patient = db.patients.find_one({"patient_id": patient_id}, {"_id": 0}) or {}
+        patient_name = (patient.get("name") or "").strip() or "Unknown Patient"
+        scheduled_start = visit.get("scheduled_start")
+        appointments.append(
+            {
+                "appointment_id": str(visit.get("visit_id") or ""),
+                "patient_id": patient_id,
+                "patient_name": patient_name,
+                "scheduled_start": scheduled_start,
+                "chief_complaint": visit.get("chief_complaint") or "Visit",
+                "appointment_type": visit.get("visit_type") or "visit",
+                "previsit_completed": False,
+                "visit_id": str(visit.get("visit_id") or ""),
+            }
+        )
+
+    return {"appointments": appointments}
+
+
 @router.get("/{visit_id}")
 def get_visit(visit_id: str) -> dict:
     """Return visit details for visit workflow page."""

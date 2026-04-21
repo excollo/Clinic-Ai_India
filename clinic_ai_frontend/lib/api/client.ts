@@ -483,6 +483,22 @@ class APIClient {
     return await this.client.get(`/api/visits/provider/${providerId}`, { params });
   }
 
+  async getProviderUpcomingVisits(providerId: string) {
+    const response = await this.client.get(`/api/visits/provider/${providerId}/upcoming`);
+    return response.data as {
+      appointments: Array<{
+        appointment_id: string;
+        patient_id: string;
+        patient_name: string;
+        scheduled_start?: string;
+        chief_complaint?: string;
+        appointment_type?: string;
+        previsit_completed?: boolean;
+        visit_id?: string;
+      }>;
+    };
+  }
+
   async cancelVisit(visitId: string) {
     return await this.client.delete(`/api/visits/${visitId}`);
   }

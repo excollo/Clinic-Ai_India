@@ -11,6 +11,7 @@ import RiskStratification from "@/components/appoint-ready/RiskStratification";
 import CareGaps from "@/components/appoint-ready/CareGaps";
 import MedicationReview from "@/components/appoint-ready/MedicationReview";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { ArrowLeft, Loader2, Bot, FileText, CheckSquare, ChevronRight, ChevronLeft, Activity, AlertTriangle, Pill, Target } from "lucide-react";
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
@@ -168,13 +169,26 @@ export default function VisitPage({ params }: { params: { id: string } }) {
       setPrevisitSummary(summaryText);
       toast.success('Previsit summary generated');
     } catch (error: any) {
-      toast.error(error?.response?.data?.detail || 'Failed to generate previsit summary');
+      const detail = error?.response?.data?.detail;
+      if (detail === 'PREVISIT_MISSING') {
+        const msg = 'Previsit summary cannot be generated because intake session is not completed yet.';
+        setPrevisitSummary(msg);
+        toast.error(msg);
+      } else {
+        toast.error(detail || 'Failed to generate previsit summary');
+      }
     } finally {
       setIsGeneratingPrevisit(false);
     }
   };
 
   const handleGeneratePostVisitSummary = async () => {
+    if (!transcriptJobId) {
+      const msg = 'Post visit summary requires transcript. Please upload/record transcript first.';
+      setPostVisitSummary(msg);
+      toast.error(msg);
+      return;
+    }
     setIsGeneratingPostVisit(true);
     try {
       const response = await apiClient.generateClinicalNote({

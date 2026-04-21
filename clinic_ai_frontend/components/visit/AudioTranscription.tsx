@@ -27,6 +27,8 @@ export default function AudioTranscription({ visitId, patientId, onTranscription
   const [isUploading, setIsUploading] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [processingMessage, setProcessingMessage] = useState('');
   const [transcriptions, setTranscriptions] = useState<Transcription[]>([]);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -75,6 +77,8 @@ export default function AudioTranscription({ visitId, patientId, onTranscription
         created_at: new Date().toISOString(),
       };
       setTranscriptions(prev => [newTranscription, ...prev]);
+      setIsProcessing(true);
+      setProcessingMessage('Transcription queued...');
       setSelectedFile(null);
       if (fileInputRef.current) {
         fileInputRef.current.value = '';
@@ -85,10 +89,47 @@ export default function AudioTranscription({ visitId, patientId, onTranscription
       if (onTranscriptionComplete) {
         onTranscriptionComplete(newTranscription);
       }
+
+      const start = Date.now();
+      const timeoutMs = 3 * 60 * 1000;
+      while (Date.now() - start < timeoutMs) {
+        await new Promise((resolve) => setTimeout(resolve, 2500));
+        const status = await apiClient.getVisitTranscriptionStatus(patientId, visitId);
+        const normalized = String(status?.status || '').toLowerCase();
+        setProcessingMessage(String(status?.message || 'Transcription processing...'));
+
+        if (normalized === 'failed' || normalized === 'stale_processing') {
+          setTranscriptions((prev) =>
+            prev.map((t) => (t.id === newTranscription.id ? { ...t, status: 'FAILED' } : t))
+          );
+          throw new Error(String(status?.error || status?.error_message || 'Transcription failed'));
+        }
+
+        if (normalized === 'completed') {
+          const dialogue = await apiClient.getVisitDialogue(patientId, visitId);
+          const text = String(dialogue?.data?.transcript || '');
+          setTranscriptions((prev) =>
+            prev.map((t) =>
+              t.id === newTranscription.id
+                ? { ...t, status: 'COMPLETED', transcription_text: text }
+                : t
+            )
+          );
+          setProcessingMessage('Transcription completed');
+          return;
+        }
+      }
+      throw new Error('Timed out waiting for transcription');
     } catch (error: any) {
       console.error('Error uploading audio:', error);
-      toast.error(error.response?.data?.detail || 'Failed to upload audio');
+      const detail = error.response?.data?.detail;
+      if (detail === 'PREVISIT_MISSING') {
+        toast.error('Cannot transcribe yet: intake/previsit summary is missing.');
+      } else {
+        toast.error(detail || error.message || 'Failed to upload audio');
+      }
     } finally {
+      setIsProcessing(false);
       setIsUploading(false);
     }
   };
@@ -153,12 +194,7 @@ export default function AudioTranscription({ visitId, patientId, onTranscription
   };
 
   const loadTranscriptions = async () => {
-    try {
-      const response = await apiClient.getVisitTranscriptions(visitId);
-      setTranscriptions(response.data);
-    } catch (error) {
-      console.error('Error loading transcriptions:', error);
-    }
+    // Keep local state source of truth for now; backend list endpoint may not exist for this route set.
   };
 
   React.useEffect(() => {
@@ -215,7 +251,7 @@ export default function AudioTranscription({ visitId, patientId, onTranscription
               />
               <Button
                 onClick={handleUpload}
-                disabled={!selectedFile || isUploading}
+                disabled={!selectedFile || isUploading || isProcessing || isRecording}
               >
                 {isUploading ? (
                   <>
@@ -256,6 +292,7 @@ export default function AudioTranscription({ visitId, patientId, onTranscription
                   onClick={startRecording}
                   variant="outline"
                   className="flex-1"
+                  disabled={isUploading || isProcessing || !!selectedFile}
                 >
                   <Mic className="mr-2 h-4 w-4" />
                   Start Recording
@@ -291,6 +328,9 @@ export default function AudioTranscription({ visitId, patientId, onTranscription
                   )}
                 </div>
               </div>
+            )}
+            {isProcessing && (
+              <p className="text-sm text-blue-700">{processingMessage || 'Transcription processing...'}</p>
             )}
           </div>
         </CardContent>

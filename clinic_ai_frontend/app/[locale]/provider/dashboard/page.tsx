@@ -16,6 +16,7 @@ import Link from "next/link";
 import axios from 'axios';
 import toast from 'react-hot-toast';
 import { useAuthStore } from '@/lib/stores/authStore';
+import { apiClient } from '@/lib/api/client';
 import PreVisitPrepModal from '@/components/provider/PreVisitPrepModal';
 import { WelcomeModal } from '@/components/dashboard/WelcomeModal';
 
@@ -113,17 +114,10 @@ export default function ProviderDashboardPage() {
 
       const mergedAppointments: ScheduledAppointment[] = [];
       try {
-        const token = localStorage.getItem('access_token');
-        // Fetch upcoming appointments instead of today's, to show seeded future data
-        const response = await axios.get(
-          `${process.env.NEXT_PUBLIC_API_URL || '/api'}/api/appointments/provider/${user.id}/upcoming`,
-          {
-            headers: { Authorization: `Bearer ${token}` }
-          }
-        );
+        const response = await apiClient.getProviderUpcomingVisits(user.id);
 
-        if (response.data && response.data.appointments) {
-          const mappedAppointments: ScheduledAppointment[] = response.data.appointments.map((appt: any) => ({
+        if (response && response.appointments) {
+          const mappedAppointments: ScheduledAppointment[] = response.appointments.map((appt: any) => ({
             id: appt.appointment_id,
             patient: {
               id: appt.patient_id,

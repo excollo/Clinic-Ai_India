@@ -7,6 +7,8 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, Plus, Upload, FileSpreadsheet, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import Link from 'next/link';
+import { useAuthStore } from '@/lib/stores/authStore';
+import { apiClient } from '@/lib/api/client';
 
 const LOCAL_APPOINTMENTS_KEY = 'provider_local_appointments';
 
@@ -22,6 +24,7 @@ type CalendarEvent = {
 };
 
 export default function ProviderCalendarPage() {
+  const { user } = useAuthStore();
   const [currentDate, setCurrentDate] = useState(new Date());
   const [isImportOpen, setIsImportOpen] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -139,28 +142,51 @@ export default function ProviderCalendarPage() {
   };
 
   useEffect(() => {
-    if (typeof window === 'undefined') return;
-
-    const localAppointments = JSON.parse(localStorage.getItem(LOCAL_APPOINTMENTS_KEY) || '[]');
-    const parsedEvents: CalendarEvent[] = localAppointments
-      .map((item: any) => {
-        const dt = new Date(item.scheduled_start);
-        if (Number.isNaN(dt.getTime())) return null;
-        return {
-          id: item.id || item.visit_id || crypto.randomUUID(),
-          patient: item.patient_name || 'Unknown Patient',
-          time: dt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          type: item.type || 'Visit',
-          scheduledStart: item.scheduled_start,
-          day: dt.getDate(),
-          month: dt.getMonth(),
-          year: dt.getFullYear(),
-        };
-      })
-      .filter(Boolean) as CalendarEvent[];
-
-    setCalendarEvents(parsedEvents);
-  }, []);
+    const loadEvents = async () => {
+      if (!user?.id) return;
+      try {
+        const response = await apiClient.getProviderUpcomingVisits(user.id);
+        const backendEvents: CalendarEvent[] = (response.appointments || [])
+          .map((item) => {
+            const scheduled = item.scheduled_start;
+            const dt = scheduled ? new Date(scheduled) : null;
+            if (!dt || Number.isNaN(dt.getTime())) return null;
+            return {
+              id: item.visit_id || item.appointment_id || crypto.randomUUID(),
+              patient: item.patient_name || 'Unknown Patient',
+              time: dt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+              type: item.appointment_type || 'Visit',
+              scheduledStart: scheduled,
+              day: dt.getDate(),
+              month: dt.getMonth(),
+              year: dt.getFullYear(),
+            };
+          })
+          .filter(Boolean) as CalendarEvent[];
+        setCalendarEvents(backendEvents);
+      } catch (error) {
+        const localAppointments = JSON.parse(localStorage.getItem(LOCAL_APPOINTMENTS_KEY) || '[]');
+        const parsedEvents: CalendarEvent[] = localAppointments
+          .map((item: any) => {
+            const dt = new Date(item.scheduled_start);
+            if (Number.isNaN(dt.getTime())) return null;
+            return {
+              id: item.id || item.visit_id || crypto.randomUUID(),
+              patient: item.patient_name || 'Unknown Patient',
+              time: dt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+              type: item.type || 'Visit',
+              scheduledStart: item.scheduled_start,
+              day: dt.getDate(),
+              month: dt.getMonth(),
+              year: dt.getFullYear(),
+            };
+          })
+          .filter(Boolean) as CalendarEvent[];
+        setCalendarEvents(parsedEvents);
+      }
+    };
+    loadEvents();
+  }, [user?.id]);
 
   const monthEvents = useMemo(() => {
     const eventsForMonth = calendarEvents.filter(
