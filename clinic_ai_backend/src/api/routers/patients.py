@@ -2,12 +2,14 @@
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 
 from src.adapters.db.mongo.client import get_database
 from src.application.services.intake_chat_service import IntakeChatService
 from src.application.utils.patient_identity import stable_patient_id
 from src.api.schemas.patient import (
+    CreateVisitFromPatientRequest,
+    CreateVisitFromPatientResponse,
     PatientRegisterRequest,
     PatientRegisterResponse,
     PatientSummaryResponse,
@@ -89,3 +91,30 @@ def register_patient(payload: PatientRegisterRequest) -> PatientRegisterResponse
         language=payload.preferred_language,
     )
     return PatientRegisterResponse(patient_id=patient_id, visit_id=visit_id, whatsapp_triggered=True)
+
+
+@router.post("/{patient_id}/visits", response_model=CreateVisitFromPatientResponse)
+def create_visit_from_existing_patient(
+    patient_id: str,
+    payload: CreateVisitFromPatientRequest,
+) -> CreateVisitFromPatientResponse:
+    """Create a new open visit for an existing patient and return visit_id."""
+    db = get_database()
+    patient = db.patients.find_one({"patient_id": patient_id}, {"_id": 0, "patient_id": 1})
+    if not patient:
+        raise HTTPException(status_code=404, detail="Patient not found")
+
+    visit_id = str(uuid4())
+    now = datetime.now(timezone.utc)
+    db.visits.insert_one(
+        {
+            "visit_id": visit_id,
+            "patient_id": patient_id,
+            "provider_id": payload.provider_id,
+            "status": "open",
+            "created_at": now,
+            "updated_at": now,
+        }
+    )
+
+    return CreateVisitFromPatientResponse(patient_id=patient_id, visit_id=visit_id, status="open")

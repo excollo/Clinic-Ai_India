@@ -44,3 +44,17 @@ class PatientSummaryResponse(BaseModel):
     full_name: str
     date_of_birth: str
     mrn: str
+
+
+class CreateVisitFromPatientRequest(BaseModel):
+    """Request body for creating a new visit from an existing patient."""
+
+    provider_id: str | None = None
+
+
+class CreateVisitFromPatientResponse(BaseModel):
+    """Response body for creating a new visit from patient selection."""
+
+    patient_id: str
+    visit_id: str
+    status: str

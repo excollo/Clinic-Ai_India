@@ -410,6 +410,17 @@ class APIClient {
     };
   }
 
+  async createVisitFromPatient(patientId: string, providerId?: string) {
+    const response = await this.client.post(`/api/patients/${patientId}/visits`, {
+      provider_id: providerId,
+    });
+    return response.data as {
+      patient_id: string;
+      visit_id: string;
+      status: string;
+    };
+  }
+
   async updatePatient(patientId: string, data: Record<string, any>) {
     const response = await this.client.put(`/api/patients/${patientId}`, data);
     return response.data;
