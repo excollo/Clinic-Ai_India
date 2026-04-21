@@ -1,4 +1,4 @@
-// File: C:\Users\Excollo\Desktop\heatlhai\HEALTH_AI\healthai\frontend\app\layout.tsx
+// File: C:\Users\Excollo\Desktop\Clinic-Ai_India\clinic_ai_frontend\app\layout.tsx
 import * as entry from '../../../app/layout.js'
 import type { ResolvingMetadata, ResolvingViewport } from 'next/dist/lib/metadata/types/metadata-interface.js'
 
