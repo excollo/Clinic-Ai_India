@@ -32,3 +32,15 @@ class PatientRegisterResponse(BaseModel):
     patient_id: str
     visit_id: str
     whatsapp_triggered: bool
+
+
+class PatientSummaryResponse(BaseModel):
+    """Compact patient payload used by provider visit scheduling UI."""
+
+    id: str
+    patient_id: str
+    first_name: str
+    last_name: str
+    full_name: str
+    date_of_birth: str
+    mrn: str

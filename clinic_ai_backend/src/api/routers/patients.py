@@ -7,9 +7,45 @@ from fastapi import APIRouter
 from src.adapters.db.mongo.client import get_database
 from src.application.services.intake_chat_service import IntakeChatService
 from src.application.utils.patient_identity import stable_patient_id
-from src.api.schemas.patient import PatientRegisterRequest, PatientRegisterResponse
+from src.api.schemas.patient import (
+    PatientRegisterRequest,
+    PatientRegisterResponse,
+    PatientSummaryResponse,
+)
 
-router = APIRouter(prefix="/patients", tags=["Patients"])
+router = APIRouter(prefix="/api/patients", tags=["Patients"])
+
+
+@router.get("", response_model=list[PatientSummaryResponse])
+def list_patients() -> list[PatientSummaryResponse]:
+    """Return normalized patient records for frontend patient picker."""
+    db = get_database()
+    records = db.patients.find({}, {"_id": 0}).sort("updated_at", -1)
+    patients: list[PatientSummaryResponse] = []
+
+    for record in records:
+        full_name = (record.get("name") or "").strip()
+        name_parts = [part for part in full_name.split(" ") if part]
+        first_name = name_parts[0] if name_parts else "Unknown"
+        last_name = " ".join(name_parts[1:]) if len(name_parts) > 1 else ""
+        patient_id = str(record.get("patient_id") or "")
+        age = record.get("age")
+        year = datetime.now(timezone.utc).year - age if isinstance(age, int) and age > 0 else 1970
+        estimated_dob = f"{year:04d}-01-01"
+
+        patients.append(
+            PatientSummaryResponse(
+                id=patient_id,
+                patient_id=patient_id,
+                first_name=first_name,
+                last_name=last_name,
+                full_name=full_name or first_name,
+                date_of_birth=str(record.get("date_of_birth") or estimated_dob),
+                mrn=str(record.get("mrn") or patient_id),
+            )
+        )
+
+    return patients
 
 
 @router.post("/register", response_model=PatientRegisterResponse)
