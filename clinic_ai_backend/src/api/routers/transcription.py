@@ -25,7 +25,7 @@ from src.application.services.dialogue_pii import scrub_dialogue_turns
 from src.application.services.structure_dialogue import structure_dialogue_from_transcript_sync
 from src.core.config import get_settings
 
-router = APIRouter(prefix="/notes", tags=["Transcription"])
+router = APIRouter(prefix="/api/notes", tags=["Transcription"])
 _upload_log = logging.getLogger(__name__)
 
 
@@ -162,7 +162,7 @@ async def upload_transcription_audio(
                 exc,
             )
 
-    poll_hint = f"/notes/transcribe/status/{patient_id}/{visit_id}"
+    poll_hint = f"/api/notes/transcribe/status/{patient_id}/{visit_id}"
     return TranscriptionUploadAcceptedResponse(
         job_id=job_id,
         message_id=job_id,

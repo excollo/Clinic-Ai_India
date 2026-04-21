@@ -537,7 +537,7 @@ class APIClient {
     formData.append('language_mix', options?.language_mix || 'en');
     formData.append('speaker_mode', options?.speaker_mode || 'two_speakers');
 
-    const response = await this.client.post('/notes/transcribe', formData, {
+    const response = await this.client.post('/api/notes/transcribe', formData, {
       headers: {
         'Content-Type': 'multipart/form-data',
       },
@@ -546,19 +546,19 @@ class APIClient {
   }
 
   async getVisitTranscriptionStatus(patientId: string, visitId: string) {
-    const response = await this.client.get(`/notes/transcribe/status/${encodeURIComponent(patientId)}/${encodeURIComponent(visitId)}`);
+    const response = await this.client.get(`/api/notes/transcribe/status/${encodeURIComponent(patientId)}/${encodeURIComponent(visitId)}`);
     return response.data;
   }
 
   async getVisitDialogue(patientId: string, visitId: string) {
-    const response = await this.client.get(`/notes/${encodeURIComponent(patientId)}/visits/${encodeURIComponent(visitId)}/dialogue`, {
+    const response = await this.client.get(`/api/notes/${encodeURIComponent(patientId)}/visits/${encodeURIComponent(visitId)}/dialogue`, {
       validateStatus: (status) => status === 200 || status === 202,
     });
     return response;
   }
 
   async structureVisitDialogue(patientId: string, visitId: string) {
-    const response = await this.client.post(`/notes/${encodeURIComponent(patientId)}/visits/${encodeURIComponent(visitId)}/dialogue/structure`);
+    const response = await this.client.post(`/api/notes/${encodeURIComponent(patientId)}/visits/${encodeURIComponent(visitId)}/dialogue/structure`);
     return response.data;
   }
 
@@ -570,12 +570,12 @@ class APIClient {
     preferred_language?: string;
     follow_up_date?: string;
   }) {
-    const response = await this.client.post('/notes/clinical-note', data);
+    const response = await this.client.post('/api/notes/clinical-note', data);
     return response.data;
   }
 
   async getLatestClinicalNote(patientId: string, visitId: string) {
-    const response = await this.client.get('/notes/clinical-note', {
+    const response = await this.client.get('/api/notes/clinical-note', {
       params: { patient_id: patientId, visit_id: visitId },
     });
     return response.data;

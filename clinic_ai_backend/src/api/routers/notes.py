@@ -10,7 +10,7 @@ from src.application.use_cases.generate_post_visit_summary import GeneratePostVi
 from src.application.use_cases.generate_soap_note import GenerateSoapNoteUseCase
 from src.core.config import get_settings
 
-router = APIRouter(prefix="/notes", tags=["Notes"])
+router = APIRouter(prefix="/api/notes", tags=["Notes"])
 
 
 @router.post("/clinical-note", response_model=NoteGenerateResponse)
