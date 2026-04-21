@@ -50,6 +50,7 @@ class CreateVisitFromPatientRequest(BaseModel):
     """Request body for creating a new visit from an existing patient."""
 
     provider_id: str | None = None
+    scheduled_start: str | None = None
 
 
 class CreateVisitFromPatientResponse(BaseModel):
@@ -58,3 +59,4 @@ class CreateVisitFromPatientResponse(BaseModel):
     patient_id: str
     visit_id: str
     status: str
+    scheduled_start: str | None = None

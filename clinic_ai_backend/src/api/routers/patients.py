@@ -111,10 +111,16 @@ def create_visit_from_existing_patient(
             "visit_id": visit_id,
             "patient_id": patient_id,
             "provider_id": payload.provider_id,
+            "scheduled_start": payload.scheduled_start,
             "status": "open",
             "created_at": now,
             "updated_at": now,
         }
     )
 
-    return CreateVisitFromPatientResponse(patient_id=patient_id, visit_id=visit_id, status="open")
+    return CreateVisitFromPatientResponse(
+        patient_id=patient_id,
+        visit_id=visit_id,
+        status="open",
+        scheduled_start=payload.scheduled_start,
+    )

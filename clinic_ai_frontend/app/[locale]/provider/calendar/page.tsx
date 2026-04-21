@@ -1,19 +1,32 @@
 'use client';
 
-import { useState, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, Plus, Upload, FileSpreadsheet, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { toast } from 'react-hot-toast';
-import apiClient from '@/lib/api/client';
 import Link from 'next/link';
+
+const LOCAL_APPOINTMENTS_KEY = 'provider_local_appointments';
+
+type CalendarEvent = {
+  id: string;
+  patient: string;
+  time: string;
+  type: string;
+  scheduledStart: string;
+  day: number;
+  month: number;
+  year: number;
+};
 
 export default function ProviderCalendarPage() {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [isImportOpen, setIsImportOpen] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [importResult, setImportResult] = useState<{ success: number; failed: number; errors: string[] } | null>(null);
+  const [calendarEvents, setCalendarEvents] = useState<CalendarEvent[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const monthNames = [
@@ -125,22 +138,58 @@ export default function ProviderCalendarPage() {
     }
   };
 
-  const days = getDaysInMonth(currentDate);
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
 
-  // Mock appointments for demo
-  const mockAppointments: Record<number, Array<{ time: string; patient: string; type: string }>> = {
-    29: [
-      { time: '10:00 AM', patient: 'John Smith', type: 'Follow-up' },
-      { time: '7:00 PM', patient: 'Jamie D. Appleseed', type: 'Annual Physical' },
-    ],
-    15: [
-      { time: '9:00 AM', patient: 'Sarah Johnson', type: 'Consultation' },
-      { time: '2:00 PM', patient: 'Mike Williams', type: 'Check-up' },
-    ],
-    22: [
-      { time: '11:00 AM', patient: 'Emily Davis', type: 'Follow-up' },
-    ],
-  };
+    const localAppointments = JSON.parse(localStorage.getItem(LOCAL_APPOINTMENTS_KEY) || '[]');
+    const parsedEvents: CalendarEvent[] = localAppointments
+      .map((item: any) => {
+        const dt = new Date(item.scheduled_start);
+        if (Number.isNaN(dt.getTime())) return null;
+        return {
+          id: item.id || item.visit_id || crypto.randomUUID(),
+          patient: item.patient_name || 'Unknown Patient',
+          time: dt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          type: item.type || 'Visit',
+          scheduledStart: item.scheduled_start,
+          day: dt.getDate(),
+          month: dt.getMonth(),
+          year: dt.getFullYear(),
+        };
+      })
+      .filter(Boolean) as CalendarEvent[];
+
+    setCalendarEvents(parsedEvents);
+  }, []);
+
+  const monthEvents = useMemo(() => {
+    const eventsForMonth = calendarEvents.filter(
+      (event) => event.month === currentDate.getMonth() && event.year === currentDate.getFullYear()
+    );
+
+    const map: Record<number, Array<{ time: string; patient: string; type: string }>> = {};
+    for (const event of eventsForMonth) {
+      if (!map[event.day]) map[event.day] = [];
+      map[event.day].push({
+        time: event.time,
+        patient: event.patient,
+        type: event.type,
+      });
+    }
+
+    Object.values(map).forEach((arr) =>
+      arr.sort((a, b) => new Date(`1970-01-01 ${a.time}`).getTime() - new Date(`1970-01-01 ${b.time}`).getTime())
+    );
+    return map;
+  }, [calendarEvents, currentDate]);
+
+  const upcomingMonthEvents = useMemo(() => {
+    return calendarEvents
+      .filter((event) => event.month === currentDate.getMonth() && event.year === currentDate.getFullYear())
+      .sort((a, b) => new Date(a.scheduledStart).getTime() - new Date(b.scheduledStart).getTime());
+  }, [calendarEvents, currentDate]);
+
+  const days = getDaysInMonth(currentDate);
 
   return (
     <div className="space-y-6">
@@ -197,8 +246,7 @@ export default function ProviderCalendarPage() {
 
             {/* Calendar days */}
             {days.map((day, index) => {
-              const hasAppointments = day && mockAppointments[day];
-              const appointments = day ? mockAppointments[day] || [] : [];
+              const appointments = day ? monthEvents[day] || [] : [];
 
               return (
                 <div
@@ -251,15 +299,10 @@ export default function ProviderCalendarPage() {
         </CardHeader>
         <CardContent>
           <div className="space-y-3">
-            {Object.entries(mockAppointments)
-              .flatMap(([day, appointments]) =>
-                appointments.map((apt) => ({
-                  day: parseInt(day),
-                  ...apt,
-                }))
-              )
-              .sort((a, b) => a.day - b.day)
-              .map((apt, idx) => (
+            {upcomingMonthEvents.length === 0 && (
+              <p className="text-sm text-gray-600">No appointments for this month yet.</p>
+            )}
+            {upcomingMonthEvents.map((apt, idx) => (
                 <div
                   key={idx}
                   className="flex items-center justify-between p-4 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors"

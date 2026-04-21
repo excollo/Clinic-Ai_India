@@ -17,6 +17,8 @@ interface Patient {
   mrn: string;
 }
 
+const LOCAL_APPOINTMENTS_KEY = 'provider_local_appointments';
+
 export default function NewVisitPage() {
   const router = useRouter();
   const { user, isAuthenticated } = useAuthStore();
@@ -24,6 +26,8 @@ export default function NewVisitPage() {
   const [patients, setPatients] = useState<Patient[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null);
+  const [scheduledDate, setScheduledDate] = useState('');
+  const [scheduledTime, setScheduledTime] = useState('');
 
   useEffect(() => {
     if (!isAuthenticated) {
@@ -69,10 +73,31 @@ export default function NewVisitPage() {
       return;
     }
 
+    if (!scheduledDate || !scheduledTime) {
+      toast.error('Please select appointment date and time');
+      return;
+    }
+
     setIsLoading(true);
 
     try {
-      const response = await apiClient.createVisitFromPatient(selectedPatient.id, user?.id);
+      const scheduledStart = `${scheduledDate}T${scheduledTime}:00`;
+      const response = await apiClient.createVisitFromPatient(selectedPatient.id, {
+        provider_id: user?.id,
+        scheduled_start: scheduledStart,
+      });
+
+      if (typeof window !== 'undefined') {
+        const existing = JSON.parse(localStorage.getItem(LOCAL_APPOINTMENTS_KEY) || '[]');
+        existing.push({
+          id: response.visit_id,
+          patient_id: selectedPatient.id,
+          patient_name: `${selectedPatient.first_name} ${selectedPatient.last_name}`,
+          scheduled_start: scheduledStart,
+          type: 'Visit',
+        });
+        localStorage.setItem(LOCAL_APPOINTMENTS_KEY, JSON.stringify(existing));
+      }
 
       toast.success('Visit created successfully');
 
@@ -174,6 +199,29 @@ export default function NewVisitPage() {
               </div>
             </div>
 
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              <div>
+                <label className="mb-2 block text-sm font-medium text-gray-700">Appointment Date *</label>
+                <Input
+                  type="date"
+                  value={scheduledDate}
+                  onChange={(e) => setScheduledDate(e.target.value)}
+                  className="w-full"
+                  required
+                />
+              </div>
+              <div>
+                <label className="mb-2 block text-sm font-medium text-gray-700">Appointment Time *</label>
+                <Input
+                  type="time"
+                  value={scheduledTime}
+                  onChange={(e) => setScheduledTime(e.target.value)}
+                  className="w-full"
+                  required
+                />
+              </div>
+            </div>
+
             {/* Action Buttons */}
             <div className="flex gap-3 pt-4 border-t border-gray-200">
               <Button
@@ -208,8 +256,8 @@ export default function NewVisitPage() {
           <h3 className="font-medium text-blue-900 mb-2">📋 Instructions</h3>
           <ul className="text-sm text-blue-800 space-y-1">
             <li>• Select a registered patient from the database</li>
+            <li>• Set appointment date and time</li>
             <li>• Click Create Visit ID to generate a fresh visit</li>
-            <li>• Date/time and complaint are not required in this flow</li>
             <li>• You will be redirected to the created visit record</li>
           </ul>
         </div>

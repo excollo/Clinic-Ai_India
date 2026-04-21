@@ -410,14 +410,19 @@ class APIClient {
     };
   }
 
-  async createVisitFromPatient(patientId: string, providerId?: string) {
+  async createVisitFromPatient(patientId: string, payload?: {
+    provider_id?: string;
+    scheduled_start?: string;
+  }) {
     const response = await this.client.post(`/api/patients/${patientId}/visits`, {
-      provider_id: providerId,
+      provider_id: payload?.provider_id,
+      scheduled_start: payload?.scheduled_start,
     });
     return response.data as {
       patient_id: string;
       visit_id: string;
       status: string;
+      scheduled_start?: string;
     };
   }
 
