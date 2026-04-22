@@ -69,10 +69,13 @@ def get_latest_visit_for_patient(patient_id: str) -> dict:
     visit = db.visits.find_one({"patient_id": internal_patient_id}, sort=[("created_at", -1)])
     if not visit:
         raise HTTPException(status_code=404, detail="No visit found for this patient")
+    resolved_visit_id = str(visit.get("visit_id") or visit.get("id") or "").strip()
+    if not resolved_visit_id:
+        raise HTTPException(status_code=404, detail="No valid visit found for this patient")
 
     return {
         "patient_id": encode_patient_id(internal_patient_id),
-        "visit_id": str(visit.get("visit_id") or ""),
+        "visit_id": resolved_visit_id,
         "status": str(visit.get("status") or "open"),
         "scheduled_start": visit.get("scheduled_start"),
     }
