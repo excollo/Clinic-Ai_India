@@ -90,36 +90,7 @@ export default function AudioTranscription({ visitId, patientId, onTranscription
         onTranscriptionComplete(newTranscription);
       }
 
-      const start = Date.now();
-      const timeoutMs = 3 * 60 * 1000;
-      while (Date.now() - start < timeoutMs) {
-        await new Promise((resolve) => setTimeout(resolve, 2500));
-        const status = await apiClient.getVisitTranscriptionStatus(patientId, visitId);
-        const normalized = String(status?.status || '').toLowerCase();
-        setProcessingMessage(String(status?.message || 'Transcription processing...'));
-
-        if (normalized === 'failed' || normalized === 'stale_processing') {
-          setTranscriptions((prev) =>
-            prev.map((t) => (t.id === newTranscription.id ? { ...t, status: 'FAILED' } : t))
-          );
-          throw new Error(String(status?.error || status?.error_message || 'Transcription failed'));
-        }
-
-        if (normalized === 'completed') {
-          const dialogue = await apiClient.getVisitDialogue(patientId, visitId);
-          const text = String(dialogue?.data?.transcript || '');
-          setTranscriptions((prev) =>
-            prev.map((t) =>
-              t.id === newTranscription.id
-                ? { ...t, status: 'COMPLETED', transcription_text: text }
-                : t
-            )
-          );
-          setProcessingMessage('Transcription completed');
-          return;
-        }
-      }
-      throw new Error('Timed out waiting for transcription');
+      await refreshFromBackend(newTranscription.id, true);
     } catch (error: any) {
       console.error('Error uploading audio:', error);
       const detail = error.response?.data?.detail;
@@ -193,8 +164,55 @@ export default function AudioTranscription({ visitId, patientId, onTranscription
     }
   };
 
+  const refreshFromBackend = async (fallbackId?: string, waitUntilDone: boolean = false) => {
+    const start = Date.now();
+    const timeoutMs = 3 * 60 * 1000;
+    do {
+      const status = await apiClient.getVisitTranscriptionStatus(patientId, visitId);
+      const normalized = String(status?.status || '').toLowerCase();
+      setProcessingMessage(String(status?.message || 'Transcription processing...'));
+
+      const inferredId = String(status?.transcription_id || fallbackId || `job-${Date.now()}`);
+      const base: Transcription = {
+        id: inferredId,
+        transcription_text: '',
+        confidence_score: 0,
+        status: normalized === 'completed' ? 'COMPLETED' : normalized === 'failed' ? 'FAILED' : 'PROCESSING',
+        created_at: status?.started_at || new Date().toISOString(),
+        audio_duration_seconds: status?.audio_duration_seconds,
+      };
+
+      if (normalized === 'completed') {
+        const dialogue = await apiClient.getVisitDialogue(patientId, visitId);
+        base.transcription_text = String(dialogue?.data?.transcript || '');
+        setTranscriptions([base]);
+        setIsProcessing(false);
+        if (onTranscriptionComplete) onTranscriptionComplete(base);
+        return;
+      }
+
+      if (normalized === 'failed' || normalized === 'stale_processing') {
+        setTranscriptions([base]);
+        setIsProcessing(false);
+        throw new Error(String(status?.error || status?.error_message || 'Transcription failed'));
+      }
+
+      setTranscriptions([base]);
+      setIsProcessing(true);
+      if (!waitUntilDone) return;
+      await new Promise((resolve) => setTimeout(resolve, 2500));
+    } while (Date.now() - start < timeoutMs);
+
+    setIsProcessing(false);
+    throw new Error('Timed out waiting for transcription');
+  };
+
   const loadTranscriptions = async () => {
-    // Keep local state source of truth for now; backend list endpoint may not exist for this route set.
+    try {
+      await refreshFromBackend(undefined, false);
+    } catch {
+      // no active transcription session yet
+    }
   };
 
   React.useEffect(() => {
@@ -361,7 +379,7 @@ export default function AudioTranscription({ visitId, patientId, onTranscription
                   {getStatusBadge(transcription.status)}
                 </div>
 
-                {transcription.status === 'COMPLETED' && transcription.transcription_text && (
+                {transcription.status.toLowerCase() === 'completed' && transcription.transcription_text && (
                   <div className="space-y-2">
                     <div className="flex items-center gap-4 text-sm text-gray-600">
                       {transcription.confidence_score && (
@@ -379,13 +397,13 @@ export default function AudioTranscription({ visitId, patientId, onTranscription
                   </div>
                 )}
 
-                {transcription.status === 'PROCESSING' && (
+                {transcription.status.toLowerCase() === 'processing' && (
                   <p className="text-sm text-gray-600">
                     Transcription is being processed. This may take a few moments...
                   </p>
                 )}
 
-                {transcription.status === 'FAILED' && (
+                {transcription.status.toLowerCase() === 'failed' && (
                   <p className="text-sm text-red-600">
                     Transcription failed. Please try uploading the audio again.
                   </p>
