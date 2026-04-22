@@ -26,7 +26,6 @@ CANONICAL_INTAKE_TOPICS = (
     "recurrence_status",
     "family_history",
     "trigger_cause",
-    "travel_history",
     "pain_assessment",
     "past_evaluation",
     "menstrual_pregnancy",
@@ -137,7 +136,6 @@ TOPIC_QUESTION_TEMPLATES = {
         "recurrence_status": "Please describe whether this is a new problem, a recurrence, or a follow-up of an older diagnosis?",
         "family_history": "Please describe any similar or related health problems in your close family, such as parents or siblings?",
         "trigger_cause": "Did anything happen around the time this started, such as travel, food changes, injury, infection exposure, or stress?",
-        "travel_history": "Please describe any recent travel you have had, including where you went, when you traveled, and whether symptoms started during or after the trip?",
         "pain_assessment": "Please describe any pain you are having, including where it is, how severe it feels, what it feels like, and whether it spreads anywhere?",
         "past_evaluation": "Please describe any previous doctor visits, tests, or evaluations you have already had for this problem and what you were told?",
         "menstrual_pregnancy": "When was your last menstrual period, and have you noticed any cycle changes or a possibility of pregnancy?",
@@ -157,7 +155,6 @@ TOPIC_QUESTION_TEMPLATES = {
         "recurrence_status": "कृपया बताइए कि यह नई समस्या है, पुरानी समस्या दोबारा हुई है, या किसी पुराने निदान का फॉलो-अप है?",
         "family_history": "क्या आपके परिवार में माता-पिता या भाई-बहनों को ऐसी या मिलती-जुलती स्वास्थ्य समस्या रही है?",
         "trigger_cause": "यह शुरू होने के आसपास क्या हुआ था, जैसे यात्रा, खाने में बदलाव, चोट, संक्रमण का संपर्क, या तनाव?",
-        "travel_history": "कृपया अपनी हाल की किसी भी यात्रा के बारे में बताइए, जैसे आप कहाँ गए थे, कब गए थे, और क्या लक्षण यात्रा के दौरान या उसके बाद शुरू हुए?",
         "pain_assessment": "कृपया अपने दर्द के बारे में बताइए, जैसे कहाँ है, कितना तेज है, कैसा महसूस होता है, और क्या यह कहीं और फैलता है?",
         "past_evaluation": "कृपया बताइए कि इस समस्या के लिए आपने पहले कौन-कौन से डॉक्टर, जांच, या मूल्यांकन कराए हैं और आपको क्या बताया गया था?",
         "menstrual_pregnancy": "आपकी आखिरी माहवारी कब हुई थी, और क्या चक्र में कोई बदलाव या गर्भावस्था की संभावना है?",
@@ -260,7 +257,6 @@ class OpenAIQuestionClient:
             "{{question_number}}": str(int(context.get("question_number", 0) or 0)),
             "{{max_questions}}": str(int(context.get("max_questions", 8) or 8)),
             "{{previous_qa_json}}": json.dumps(context.get("previous_qa_json", []), ensure_ascii=True),
-            "{{has_travelled_recently}}": "true" if bool(context.get("has_travelled_recently", False)) else "false",
             "{{chief_complaint}}": str(context.get("chief_complaint", "") or ""),
             "{{deterministic_condition_category}}": guidance["condition_category"],
             "{{deterministic_priority_topics}}": json.dumps(guidance["priority_topics"], ensure_ascii=True),
@@ -589,7 +585,6 @@ class OpenAIQuestionClient:
 
     @classmethod
     def _build_universal_topic_plan(cls, context: dict, complaint: str) -> list[str]:
-        has_travel = bool(context.get("has_travelled_recently", False))
         is_chronic = any(keyword in complaint for keyword in CHRONIC_KEYWORDS)
         is_hereditary = any(keyword in complaint for keyword in HEREDITARY_KEYWORDS)
         is_allergy = any(keyword in complaint for keyword in ALLERGY_KEYWORDS)
@@ -602,7 +597,7 @@ class OpenAIQuestionClient:
             "current_medications",
             "past_medical_history",
             "trigger_cause",
-            ("travel_history" if has_travel else "impact_daily_life"),
+            "impact_daily_life",
         ]
 
         if is_chronic or is_hereditary:
@@ -658,7 +653,6 @@ class OpenAIQuestionClient:
             "recurrence_status": ["new problem", "recurrence", "फॉलोअप", "फॉलो-अप"],
             "family_history": ["close family", "परिवार", "parents or siblings"],
             "trigger_cause": ["around the time this started", "शुरू होने के आसपास", "travel food changes injury"],
-            "travel_history": ["recent travel", "हाल की किसी भी यात्रा", "during or after the trip"],
             "pain_assessment": ["pain you are having", "दर्द", "how severe it feels"],
             "past_evaluation": ["previous doctor visits", "पहले कौनकौन से डॉक्टर", "what you were told"],
             "menstrual_pregnancy": ["last menstrual period", "आखिरी माहवारी", "possibility of pregnancy"],
