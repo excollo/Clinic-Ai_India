@@ -63,14 +63,15 @@ def test_blocks_menstrual_topic_for_male_patient() -> None:
     assert "menstrual_pregnancy" in guidance["avoid_topics"]
 
 
-def test_uses_impact_daily_life_in_base_sequence() -> None:
+def test_uses_travel_history_when_recent_travel_is_true() -> None:
     guidance = OpenAIQuestionClient._build_condition_guidance(
         {
             "chief_complaint": "stomach pain",
+            "has_travelled_recently": True,
         }
     )
 
-    assert guidance["priority_topics"][5] == "impact_daily_life"
+    assert guidance["priority_topics"][5] == "travel_history"
 
 
 def test_uses_family_history_branch_for_chronic_cases() -> None:

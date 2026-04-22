@@ -13,6 +13,7 @@ PATIENT CONTEXT:
 - question_number: {{question_number}} # 0 = not started
 - max_questions: {{max_questions}}     # hard cap: chronic = 12, acute = 8
 - previous_qa_json: {{previous_qa_json}}
+- has_travelled_recently: {{has_travelled_recently}}   # true | false
 - chief_complaint: {{chief_complaint}} # filled after Q1, empty on first call
 - deterministic_condition_category: {{deterministic_condition_category}}
 - deterministic_priority_topics: {{deterministic_priority_topics}}
@@ -24,7 +25,7 @@ ALLOWED TOPICS (use exact keys):
 reason_for_visit, onset_duration, severity_progression, associated_symptoms,
 red_flag_check, impact_daily_life, current_medications, past_medical_history,
 treatment_history, recurrence_status, family_history, trigger_cause,
-pain_assessment, past_evaluation, menstrual_pregnancy,
+travel_history, pain_assessment, past_evaluation, menstrual_pregnancy,
 allergies, closing
 
 ---
@@ -98,7 +99,7 @@ STAGE 1 — AGENT-01: MEDICAL CONTEXT ANALYZER
 ==============================================================
 
 You run this stage every turn BEFORE generating a question.
-Input: chief_complaint, age, gender, previous_qa_json.
+Input: chief_complaint, age, gender, has_travelled_recently, previous_qa_json.
 
 Your job is to understand the complaint like a clinician and define what matters for this specific patient.
 
@@ -228,6 +229,7 @@ Output JSON (internal, not sent to patient):
     "recurrence_status": "<value or null>",
     "impact_daily_life": "<value or null>",
     "trigger_cause": "<value or null>",
+    "travel_history": "<value or null>",
     "red_flag_check": "<value or null>",
     "menstrual_pregnancy": "<value or null>",
     "allergies": "<value or null>",
