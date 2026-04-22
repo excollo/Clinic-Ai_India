@@ -62,7 +62,6 @@ export default function SOAPNotesEditor({ visitId, initialNotes, transcriptId, o
   const [editingSection, setEditingSection] = useState<string | null>(null);
   const [refinementInstructions, setRefinementInstructions] = useState('');
   const [isRefining, setIsRefining] = useState(false);
-  const [isLoadingClinicalTemplate, setIsLoadingClinicalTemplate] = useState(false);
   const [showTemplateBrowser, setShowTemplateBrowser] = useState(false);
   const [showSaveTemplateModal, setShowSaveTemplateModal] = useState(false);
   const [templates, setTemplates] = useState<SOAPTemplate[]>([]);
@@ -209,6 +208,8 @@ export default function SOAPNotesEditor({ visitId, initialNotes, transcriptId, o
         data_gaps: Array.isArray(payload?.data_gaps) ? payload.data_gaps : [],
       };
 
+      // Replace note body with generated clinical content to avoid duplicate
+      // template paragraphs being appended repeatedly.
       setSOAPNotes({
         doctor_notes: generatedNotes.doctor_notes || '',
         chief_complaint: generatedNotes.chief_complaint || '',
@@ -265,64 +266,15 @@ export default function SOAPNotesEditor({ visitId, initialNotes, transcriptId, o
     }
   };
 
-  const handleInsertClinicalTemplate = async () => {
-    setIsLoadingClinicalTemplate(true);
-    try {
-      const template = await apiClient.getClinicalNoteTemplate({
-        doctor_type: 'Allopathic',
-        language_style: 'English clinical',
-        region: 'India OPD',
-      });
-      setSOAPNotes((prev) => ({
-        ...prev,
-        doctor_notes:
-          prev.doctor_notes + (prev.doctor_notes ? '\n\n' : '') + String(template.doctor_notes || ''),
-        chief_complaint: prev.chief_complaint || String(template.chief_complaint || ''),
-        assessment: prev.assessment + (prev.assessment ? '\n\n' : '') + String(template.assessment || ''),
-        plan: prev.plan + (prev.plan ? '\n\n' : '') + String(template.plan || ''),
-        medications: Array.isArray(template.rx)
-          ? template.rx.map((item) => ({
-              name: String(item.medicine_name || ''),
-              dosage: String(item.dose || ''),
-              frequency: String(item.frequency || ''),
-              duration: String(item.duration || ''),
-              route: String(item.route || ''),
-              food_instruction: String(item.food_instruction || ''),
-            }))
-          : prev.medications,
-        investigations: Array.isArray(template.investigations)
-          ? template.investigations.map((item) => ({
-              name: String(item.test_name || ''),
-              urgency: String(item.urgency || ''),
-              preparation_instructions: String(item.preparation_instructions || ''),
-            }))
-          : prev.investigations,
-        follow_up: prev.follow_up || String(template.follow_up_in || template.follow_up_date || ''),
-        red_flags:
-          Array.isArray(template.red_flags) && template.red_flags.length > 0
-            ? Array.from(new Set([...(prev.red_flags || []), ...template.red_flags.map(String)]))
-            : prev.red_flags,
-        data_gaps:
-          Array.isArray(template.data_gaps) && template.data_gaps.length > 0
-            ? Array.from(new Set([...(prev.data_gaps || []), ...template.data_gaps.map(String)]))
-            : prev.data_gaps,
-      }));
-      toast.success('Clinical note template inserted');
-    } catch (error: any) {
-      console.error('Error loading clinical note template:', error);
-      toast.error(error?.response?.data?.detail || 'Failed to load clinical note template');
-    } finally {
-      setIsLoadingClinicalTemplate(false);
-    }
-  };
-
   const handleInsertTemplateFromLibrary = async (template: SOAPTemplate) => {
     const populated = populateTemplate(template, patientData || {});
+    // Apply selected template as a clean base instead of appending.
     setSOAPNotes((prev) => ({
       ...prev,
-      doctor_notes: prev.doctor_notes + (prev.doctor_notes ? '\n\n' : '') + populated.subjective,
-      assessment: prev.assessment + (prev.assessment ? '\n\n' : '') + populated.assessment,
-      plan: prev.plan + (prev.plan ? '\n\n' : '') + populated.plan,
+      doctor_notes: populated.subjective || '',
+      chief_complaint: populated.objective || prev.chief_complaint || '',
+      assessment: populated.assessment || '',
+      plan: populated.plan || '',
     }));
     setShowTemplateBrowser(false);
     try {
@@ -497,24 +449,6 @@ export default function SOAPNotesEditor({ visitId, initialNotes, transcriptId, o
                     <FileText className="mr-2 h-4 w-4" />
                     Insert Template
                   </>
-                </Button>
-                <Button
-                  onClick={handleInsertClinicalTemplate}
-                  variant="outline"
-                  size="sm"
-                  disabled={isLoadingClinicalTemplate}
-                >
-                  {isLoadingClinicalTemplate ? (
-                    <>
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      Inserting...
-                    </>
-                  ) : (
-                    <>
-                      <Sparkles className="mr-2 h-4 w-4" />
-                      Insert Clinical Template
-                    </>
-                  )}
                 </Button>
                 <Button
                   onClick={handleSaveAsTemplate}

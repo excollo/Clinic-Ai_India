@@ -81,6 +81,16 @@
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",
       "static/chunks/app/[locale]/provider/visits/[id]/page.js"
+    ],
+    "/provider/templates/page": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/provider/templates/page.js"
+    ],
+    "/[locale]/provider/templates/page": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/[locale]/provider/templates/page.js"
     ]
   }
 }

@@ -65,11 +65,14 @@ def send_latest_post_visit_summary_whatsapp_to_patient(
         resolved_language = "en"
 
     summary_sent = send_post_visit_summary_whatsapp(patient=patient, whatsapp_payload=whatsapp_payload)
-    follow_up_sent = send_immediate_follow_up_template_whatsapp(
-        patient=patient,
-        payload=payload,
-        preferred_language=resolved_language,
-    )
+    follow_up_sent = False
+    # Enforce order: follow-up template is allowed only after summary send succeeds.
+    if summary_sent:
+        follow_up_sent = send_immediate_follow_up_template_whatsapp(
+            patient=patient,
+            payload=payload,
+            preferred_language=resolved_language,
+        )
 
     if follow_up_sent:
         db.follow_up_reminders.update_one(
@@ -82,13 +85,19 @@ def send_latest_post_visit_summary_whatsapp_to_patient(
     elif summary_sent:
         message = "Post-visit summary template sent; follow-up template was not sent (check follow-up template config or Meta logs)."
     elif follow_up_sent:
-        message = "Follow-up template sent; post-visit summary template was not sent (check post-visit template config or Meta logs)."
+        message = "Follow-up template sent after summary."
     else:
-        message = (
-            "No WhatsApp messages were delivered. Check Meta credentials (WHATSAPP_ACCESS_TOKEN, "
-            "WHATSAPP_PHONE_NUMBER_ID), template names (WHATSAPP_POST_VISIT_TEMPLATE_NAME, follow-up template), "
-            "and that the patient number is valid for WhatsApp."
-        )
+        if summary_sent:
+            message = (
+                "Post-visit summary was sent, but follow-up template was not sent "
+                "(check follow-up template config or Meta logs)."
+            )
+        else:
+            message = (
+                "No WhatsApp messages were delivered. Post-visit summary template failed, "
+                "so follow-up was not attempted. Check Meta credentials (WHATSAPP_ACCESS_TOKEN, "
+                "WHATSAPP_PHONE_NUMBER_ID), WHATSAPP_POST_VISIT_TEMPLATE_NAME, and recipient number."
+            )
 
     return {
         "patient_id": patient_id,

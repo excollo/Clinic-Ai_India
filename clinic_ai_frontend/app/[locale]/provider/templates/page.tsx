@@ -59,8 +59,8 @@ export default function TemplatesPage() {
         category: item.category,
         specialty: item.specialty,
         content: {
-          subjective: item.content.subjective || '',
-          objective: item.content.objective || '',
+          subjective: item.content.subjective || item.content.doctor_notes || '',
+          objective: item.content.objective || item.content.chief_complaint || '',
           assessment: item.content.assessment || '',
           plan: item.content.plan || '',
         },
@@ -220,10 +220,10 @@ export default function TemplatesPage() {
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
             <div>
               <h1 className="text-3xl sm:text-4xl font-bold text-slate-900 mb-2">
-                SOAP Templates
+                Clinical Templates
               </h1>
               <p className="text-slate-600">
-                Browse, preview, and use clinical documentation templates
+                Browse, preview, and use clinical-note templates
               </p>
             </div>
             <Button

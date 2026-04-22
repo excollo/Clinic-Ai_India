@@ -1,12 +1,9 @@
 {
+  "/provider/templates/page": "app/provider/templates/page.js",
   "/provider/dashboard/page": "app/provider/dashboard/page.js",
-  "/provider/calendar/page": "app/provider/calendar/page.js",
-  "/favicon.ico/route": "app/favicon.ico/route.js",
-  "/login/page": "app/login/page.js",
+  "/provider/visits/[id]/page": "app/provider/visits/[id]/page.js",
   "/[locale]/login/page": "app/[locale]/login/page.js",
   "/[locale]/provider/dashboard/page": "app/[locale]/provider/dashboard/page.js",
   "/[locale]/provider/visits/[id]/page": "app/[locale]/provider/visits/[id]/page.js",
-  "/[locale]/provider/calendar/page": "app/[locale]/provider/calendar/page.js",
-  "/[locale]/provider/registered-patients/page": "app/[locale]/provider/registered-patients/page.js",
-  "/[locale]/provider/visits/new/page": "app/[locale]/provider/visits/new/page.js"
+  "/[locale]/provider/templates/page": "app/[locale]/provider/templates/page.js"
 }
