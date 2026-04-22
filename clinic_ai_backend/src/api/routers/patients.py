@@ -106,11 +106,24 @@ def register_patient(payload: PatientRegisterRequest) -> PatientRegisterResponse
             "updated_at": now,
         }
     )
+    whatsapp_triggered = False
+    phone_number = str(payload.phone_number or "").strip()
+    if phone_number:
+        try:
+            IntakeChatService().start_intake(
+                patient_id=internal_patient_id,
+                visit_id=visit_id,
+                to_number=phone_number,
+                language=str(payload.preferred_language or "en"),
+            )
+            whatsapp_triggered = True
+        except Exception:
+            whatsapp_triggered = False
 
     return PatientRegisterResponse(
         patient_id=encode_patient_id(internal_patient_id),
         visit_id=visit_id,
-        whatsapp_triggered=True,
+        whatsapp_triggered=whatsapp_triggered,
         existing_patient=existing_patient,
     )
 

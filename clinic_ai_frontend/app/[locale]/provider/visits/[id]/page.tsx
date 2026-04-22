@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import SOAPNotesEditor from "@/components/visit/SOAPNotesEditor";
 import AIAssistantChat from "@/components/visit/AIAssistantChat";
 import AudioTranscription from "@/components/visit/AudioTranscription";
+import VitalsFormPanel from "@/components/visit/VitalsFormPanel";
 import PatientContextCard from "@/components/appoint-ready/PatientContextCard";
 import RiskStratification from "@/components/appoint-ready/RiskStratification";
 import CareGaps from "@/components/appoint-ready/CareGaps";
@@ -130,7 +131,7 @@ export default function VisitPage({ params }: { params: { id: string } }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showAIChat, setShowAIChat] = useState(false);
-  const [activeTab, setActiveTab] = useState<'previsit-summary' | 'transcription' | 'soap' | 'post-visit-summary'>('transcription');
+  const [activeTab, setActiveTab] = useState<'vitals' | 'previsit-summary' | 'transcription' | 'soap' | 'post-visit-summary'>('vitals');
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [activeContextSection, setActiveContextSection] = useState<'patient' | 'risk' | 'gaps' | 'meds'>('patient');
   const [transcriptJobId, setTranscriptJobId] = useState<string | undefined>(undefined);
@@ -466,6 +467,17 @@ export default function VisitPage({ params }: { params: { id: string } }) {
         <div className="border-b border-gray-200 mb-6">
           <nav className="-mb-px flex space-x-8">
             <button
+              onClick={() => setActiveTab('vitals')}
+              className={`py-3 px-1 border-b-2 font-medium text-sm flex items-center gap-2 ${
+                activeTab === 'vitals'
+                  ? 'border-blue-600 text-blue-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              }`}
+            >
+              <FileText className="w-4 h-4" />
+              Vitals Form
+            </button>
+            <button
               onClick={() => setActiveTab('previsit-summary')}
               className={`py-3 px-1 border-b-2 font-medium text-sm flex items-center gap-2 ${
                 activeTab === 'previsit-summary'
@@ -514,6 +526,10 @@ export default function VisitPage({ params }: { params: { id: string } }) {
 
         {/* Tab Content */}
         <div>
+          {activeTab === 'vitals' && (
+            <VitalsFormPanel patientId={visit.patient_id} visitId={params.id} />
+          )}
+
           {activeTab === 'previsit-summary' && (
             <Card>
               <CardHeader>

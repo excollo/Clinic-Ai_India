@@ -462,6 +462,69 @@ class APIClient {
     return await this.client.post(`/api/visits/${visitId}/start`);
   }
 
+  // ==================== Vitals ====================
+
+  async generateVitalsForm(patientId: string, visitId: string) {
+    const response = await this.client.post(`/vitals/generate-form/${encodeURIComponent(patientId)}/${encodeURIComponent(visitId)}`);
+    return response.data as {
+      form_id: string;
+      patient_id: string;
+      visit_id: string;
+      needs_vitals: boolean;
+      reason: string;
+      fields: Array<{
+        key: string;
+        label: string;
+        field_type: string;
+        unit?: string;
+        required: boolean;
+        reason: string;
+      }>;
+      generated_at: string;
+    };
+  }
+
+  async getVitalsSubmitTemplate(patientId: string, visitId: string) {
+    const response = await this.client.get(`/vitals/submit-template/${encodeURIComponent(patientId)}/${encodeURIComponent(visitId)}`);
+    return response.data as {
+      patient_id: string;
+      visit_id: string;
+      form_id: string;
+      staff_name: string;
+      values: Array<{ key: string; value: string | number | boolean | null }>;
+      source: string;
+    };
+  }
+
+  async submitVitals(data: {
+    patient_id: string;
+    visit_id: string;
+    form_id?: string;
+    staff_name: string;
+    values: Array<{ key: string; value: string | number | boolean | null }>;
+  }) {
+    const response = await this.client.post('/vitals/submit', data);
+    return response.data as {
+      vitals_id: string;
+      patient_id: string;
+      visit_id: string;
+      submitted_at: string;
+    };
+  }
+
+  async getLatestVitals(patientId: string, visitId: string) {
+    const response = await this.client.get(`/vitals/latest/${encodeURIComponent(patientId)}/${encodeURIComponent(visitId)}`);
+    return response.data as {
+      vitals_id: string;
+      patient_id: string;
+      visit_id: string;
+      form_id?: string;
+      staff_name: string;
+      submitted_at: string;
+      values: Record<string, string | number | boolean | null>;
+    };
+  }
+
   async endVisit(visitId: string, data: {
     subjective?: string;
     objective?: string;
