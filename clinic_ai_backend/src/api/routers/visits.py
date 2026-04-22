@@ -38,7 +38,17 @@ def list_provider_upcoming_visits(provider_id: str) -> dict:
     db = get_database()
     now = datetime.now(timezone.utc)
     records = list(
-        db.visits.find({"provider_id": provider_id, "status": {"$ne": "cancelled"}}, {"_id": 0}).sort("scheduled_start", 1)
+        db.visits.find(
+            {
+                "status": {"$ne": "cancelled"},
+                "$or": [
+                    {"provider_id": provider_id},
+                    {"provider_id": None},
+                    {"provider_id": {"$exists": False}},
+                ],
+            },
+            {"_id": 0},
+        ).sort("scheduled_start", 1)
     )
 
     appointments: list[dict] = []
