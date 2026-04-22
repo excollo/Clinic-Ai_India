@@ -23,6 +23,30 @@ def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _language_candidates(settings: Any, preferred_language: str) -> list[str]:
+    lang = str(preferred_language or "en").strip().lower()
+    if lang == "hi":
+        candidates = [
+            settings.whatsapp_followup_template_lang_hi,
+            settings.whatsapp_intake_template_lang_hi,
+            "hi_IN",
+            "hi",
+        ]
+    else:
+        candidates = [
+            settings.whatsapp_followup_template_lang_en,
+            settings.whatsapp_intake_template_lang_en,
+            "en_US",
+            "en",
+        ]
+    out: list[str] = []
+    for code in candidates:
+        value = str(code or "").strip()
+        if value and value not in out:
+            out.append(value)
+    return out
+
+
 class ProcessFollowUpRemindersUseCase:
     """Scan scheduled follow-ups and send due Meta template messages."""
 
@@ -119,6 +143,9 @@ class ProcessFollowUpRemindersUseCase:
 
             lang = str(doc.get("preferred_language") or "en").strip().lower()
             language_code = follow_up_template_language_code(self.settings, lang)
+            language_codes = _language_candidates(self.settings, lang)
+            if language_code and language_code not in language_codes:
+                language_codes.insert(0, language_code)
 
             t3 = nv - timedelta(days=3)
             # Second ping: one calendar day before visit (same clock as next_visit_at), not only "24h" wall literal.
@@ -137,12 +164,37 @@ class ProcessFollowUpRemindersUseCase:
                 if param_count > 0 and not body_values:
                     body_values = [default_follow_up_body_line("3d", nv, doc)]
                 try:
-                    self.whatsapp.send_template(
-                        to_number=to_number,
-                        template_name=template_name,
-                        language_code=language_code,
-                        body_values=body_values[:param_count] if param_count else body_values,
-                    )
+                    body_primary = body_values[:param_count] if param_count else body_values
+                    body_variants: list[list[str]] = [body_primary]
+                    if body_primary:
+                        body_variants.append([])
+                    sent_ok = False
+                    last_send_error: str | None = None
+                    for lang_code in language_codes:
+                        for body_variant in body_variants:
+                            try:
+                                self.whatsapp.send_template(
+                                    to_number=to_number,
+                                    template_name=template_name,
+                                    language_code=lang_code,
+                                    body_values=body_variant,
+                                )
+                                sent_ok = True
+                                break
+                            except Exception as exc:
+                                last_send_error = str(exc)
+                                logger.warning(
+                                    "follow_up_reminder_try_failed reminder_kind=3d reminder_id=%s to=%s lang=%s params=%d error=%s",
+                                    rid,
+                                    to_number,
+                                    lang_code,
+                                    len(body_variant),
+                                    exc,
+                                )
+                        if sent_ok:
+                            break
+                    if not sent_ok:
+                        raise RuntimeError(last_send_error or "Unable to send follow-up template")
                     db.follow_up_reminders.update_one(
                         {"reminder_id": rid},
                         {"$set": {"remind_3d_sent_at": now_utc, "updated_at": now_utc}},
@@ -172,12 +224,37 @@ class ProcessFollowUpRemindersUseCase:
                 if param_count > 0 and not body_values:
                     body_values = [default_follow_up_body_line("1d", nv, fresh)]
                 try:
-                    self.whatsapp.send_template(
-                        to_number=to_number,
-                        template_name=template_name,
-                        language_code=language_code,
-                        body_values=body_values[:param_count] if param_count else body_values,
-                    )
+                    body_primary = body_values[:param_count] if param_count else body_values
+                    body_variants: list[list[str]] = [body_primary]
+                    if body_primary:
+                        body_variants.append([])
+                    sent_ok = False
+                    last_send_error: str | None = None
+                    for lang_code in language_codes:
+                        for body_variant in body_variants:
+                            try:
+                                self.whatsapp.send_template(
+                                    to_number=to_number,
+                                    template_name=template_name,
+                                    language_code=lang_code,
+                                    body_values=body_variant,
+                                )
+                                sent_ok = True
+                                break
+                            except Exception as exc:
+                                last_send_error = str(exc)
+                                logger.warning(
+                                    "follow_up_reminder_try_failed reminder_kind=1d reminder_id=%s to=%s lang=%s params=%d error=%s",
+                                    rid,
+                                    to_number,
+                                    lang_code,
+                                    len(body_variant),
+                                    exc,
+                                )
+                        if sent_ok:
+                            break
+                    if not sent_ok:
+                        raise RuntimeError(last_send_error or "Unable to send follow-up template")
                     db.follow_up_reminders.update_one(
                         {"reminder_id": rid},
                         {"$set": {"remind_24h_sent_at": now_utc, "updated_at": now_utc}},

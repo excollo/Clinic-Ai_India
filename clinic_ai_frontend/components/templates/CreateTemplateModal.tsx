@@ -43,10 +43,17 @@ export default function CreateTemplateModal({
     description: '',
     category: 'General',
     specialty: '',
-    subjective: '',
-    objective: '',
     assessment: '',
     plan: '',
+    doctor_notes: '',
+    chief_complaint: '',
+    follow_up_in: '',
+    follow_up_date: '',
+    red_flags: '',
+    data_gaps: '',
+    rx_json: '[\n  {\n    "medicine_name": "",\n    "dose": "",\n    "frequency": "",\n    "duration": "",\n    "route": "",\n    "food_instruction": ""\n  }\n]',
+    investigations_json:
+      '[\n  {\n    "test_name": "",\n    "urgency": "",\n    "preparation_instructions": ""\n  }\n]',
     tags: [] as string[],
     appointmentTypes: [] as string[],
     isFavorite: false
@@ -97,6 +104,17 @@ export default function CreateTemplateModal({
     setIsSubmitting(true);
 
     try {
+      const rx = JSON.parse(formData.rx_json || '[]');
+      const investigations = JSON.parse(formData.investigations_json || '[]');
+      const redFlags = formData.red_flags
+        .split('\n')
+        .map((v) => v.trim())
+        .filter(Boolean);
+      const dataGaps = formData.data_gaps
+        .split('\n')
+        .map((v) => v.trim())
+        .filter(Boolean);
+
       await apiClient.createTemplate({
         name: formData.name,
         description: formData.description,
@@ -104,10 +122,16 @@ export default function CreateTemplateModal({
         category: formData.category,
         specialty: formData.specialty,
         content: {
-          subjective: formData.subjective,
-          objective: formData.objective,
           assessment: formData.assessment,
           plan: formData.plan,
+          rx: Array.isArray(rx) ? rx : [],
+          investigations: Array.isArray(investigations) ? investigations : [],
+          red_flags: redFlags,
+          follow_up_in: formData.follow_up_in,
+          follow_up_date: formData.follow_up_date,
+          doctor_notes: formData.doctor_notes,
+          chief_complaint: formData.chief_complaint,
+          data_gaps: dataGaps,
         },
         tags: formData.tags,
         appointment_types: formData.appointmentTypes,
@@ -119,7 +143,9 @@ export default function CreateTemplateModal({
       onClose();
     } catch (error: any) {
       console.error('Error creating template:', error);
-      toast.error(error.response?.data?.detail || 'Failed to create template');
+      const detail = error.response?.data?.detail;
+      if (typeof detail === 'string') toast.error(detail);
+      else toast.error('Failed to create template (check JSON fields)');
     } finally {
       setIsSubmitting(false);
     }
@@ -218,22 +244,22 @@ export default function CreateTemplateModal({
             </div>
           </div>
 
-          {/* SOAP Content */}
+          {/* Clinical Template Content */}
           <div className="space-y-4">
-            <h3 className="text-lg font-semibold text-slate-900">SOAP Note Content</h3>
+            <h3 className="text-lg font-semibold text-slate-900">Clinical Template Content</h3>
             <p className="text-sm text-slate-600">
-              Use [placeholders] for values that will be filled in later (e.g., [patient_name], [blood_pressure])
+              This uses the India clinical-note schema. Enter plain text or placeholders.
             </p>
 
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-2">
-                Subjective
+                Doctor Notes
               </label>
               <textarea
-                name="subjective"
-                value={formData.subjective}
+                name="doctor_notes"
+                value={formData.doctor_notes}
                 onChange={handleInputChange}
-                placeholder="Patient reports [chief_complaint]. Symptoms started [duration] ago..."
+                placeholder="Narrative note template"
                 rows={4}
                 className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-forest-500 focus:border-transparent font-mono text-sm"
               />
@@ -241,14 +267,14 @@ export default function CreateTemplateModal({
 
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-2">
-                Objective
+                Chief Complaint
               </label>
               <textarea
-                name="objective"
-                value={formData.objective}
+                name="chief_complaint"
+                value={formData.chief_complaint}
                 onChange={handleInputChange}
-                placeholder="Vital Signs: BP [bp], HR [hr], Temp [temp]&#10;Examination findings..."
-                rows={4}
+                placeholder="Primary complaint template"
+                rows={2}
                 className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-forest-500 focus:border-transparent font-mono text-sm"
               />
             </div>
@@ -277,6 +303,75 @@ export default function CreateTemplateModal({
                 onChange={handleInputChange}
                 placeholder="1. Treatment plan: [treatment]&#10;2. Follow-up: [follow_up]&#10;3. Labs: [labs]"
                 rows={4}
+                className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-forest-500 focus:border-transparent font-mono text-sm"
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-2">Follow Up In</label>
+                <input
+                  type="text"
+                  name="follow_up_in"
+                  value={formData.follow_up_in}
+                  onChange={handleInputChange}
+                  placeholder="e.g., 2 weeks"
+                  className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-forest-500 focus:border-transparent"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-2">Follow Up Date</label>
+                <input
+                  type="text"
+                  name="follow_up_date"
+                  value={formData.follow_up_date}
+                  onChange={handleInputChange}
+                  placeholder="YYYY-MM-DD"
+                  className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-forest-500 focus:border-transparent"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-2">Red Flags (one per line)</label>
+              <textarea
+                name="red_flags"
+                value={formData.red_flags}
+                onChange={handleInputChange}
+                rows={3}
+                className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-forest-500 focus:border-transparent font-mono text-sm"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-2">Data Gaps (one per line)</label>
+              <textarea
+                name="data_gaps"
+                value={formData.data_gaps}
+                onChange={handleInputChange}
+                rows={3}
+                className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-forest-500 focus:border-transparent font-mono text-sm"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-2">rx (JSON array)</label>
+              <textarea
+                name="rx_json"
+                value={formData.rx_json}
+                onChange={handleInputChange}
+                rows={6}
+                className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-forest-500 focus:border-transparent font-mono text-sm"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-2">investigations (JSON array)</label>
+              <textarea
+                name="investigations_json"
+                value={formData.investigations_json}
+                onChange={handleInputChange}
+                rows={6}
                 className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-forest-500 focus:border-transparent font-mono text-sm"
               />
             </div>

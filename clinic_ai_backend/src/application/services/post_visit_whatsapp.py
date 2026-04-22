@@ -18,6 +18,36 @@ from src.core.config import get_settings
 logger = logging.getLogger(__name__)
 
 
+def _language_candidates(preferred_language: str, settings) -> list[str]:
+    lang = str(preferred_language or "en").strip().lower()
+    candidates: list[str] = []
+    if lang == "hi":
+        candidates.extend(
+            [
+                settings.whatsapp_followup_template_lang_hi,
+                settings.whatsapp_intake_template_lang_hi,
+                "hi_IN",
+                "hi",
+            ]
+        )
+    else:
+        candidates.extend(
+            [
+                settings.whatsapp_followup_template_lang_en,
+                settings.whatsapp_intake_template_lang_en,
+                "en_US",
+                "en",
+            ]
+        )
+    # Preserve order, drop blanks and duplicates.
+    out: list[str] = []
+    for code in candidates:
+        value = str(code or "").strip()
+        if value and value not in out:
+            out.append(value)
+    return out
+
+
 def send_post_visit_summary_whatsapp(*, patient: dict, whatsapp_payload: str) -> bool:
     """
     Send the generated post-visit text (emoji summary line) on its own template channel.
@@ -106,18 +136,26 @@ def send_immediate_follow_up_template_whatsapp(*, patient: dict, payload: dict, 
         candidate_templates.append(fallback_template)
 
     for template_name in candidate_templates:
-        try:
-            MetaWhatsAppClient().send_template(
-                to_number=to_number,
-                template_name=template_name,
-                language_code=language_code,
-                body_values=body_values[:param_count] if param_count else body_values,
-            )
-            return True
-        except Exception as exc:
-            logger.warning(
-                "follow_up_immediate_whatsapp_failed template=%s error=%s",
-                template_name,
-                exc,
-            )
+        body_primary = body_values[:param_count] if param_count else body_values
+        body_variants: list[list[str]] = [body_primary]
+        if body_primary:
+            body_variants.append([])
+        for lang_code in _language_candidates(preferred_language, settings):
+            for body_variant in body_variants:
+                try:
+                    MetaWhatsAppClient().send_template(
+                        to_number=to_number,
+                        template_name=template_name,
+                        language_code=lang_code,
+                        body_values=body_variant,
+                    )
+                    return True
+                except Exception as exc:
+                    logger.warning(
+                        "follow_up_immediate_whatsapp_failed template=%s lang=%s params=%d error=%s",
+                        template_name,
+                        lang_code,
+                        len(body_variant),
+                        exc,
+                    )
     return False

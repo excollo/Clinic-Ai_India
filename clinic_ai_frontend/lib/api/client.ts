@@ -971,10 +971,27 @@ class APIClient {
     category?: string;
     specialty?: string;
     content: {
-      subjective: string;
-      objective: string;
       assessment: string;
       plan: string;
+      rx: Array<{
+        medicine_name: string;
+        dose: string;
+        frequency: string;
+        duration: string;
+        route?: string;
+        food_instruction?: string;
+      }>;
+      investigations: Array<{
+        test_name: string;
+        urgency?: string;
+        preparation_instructions?: string;
+      }>;
+      red_flags: string[];
+      follow_up_in: string;
+      follow_up_date: string;
+      doctor_notes: string;
+      chief_complaint: string;
+      data_gaps: string[];
     };
     tags?: string[];
     appointment_types?: string[];
@@ -1021,10 +1038,27 @@ class APIClient {
     category?: string;
     specialty?: string;
     content?: {
-      subjective?: string;
-      objective?: string;
       assessment?: string;
       plan?: string;
+      rx?: Array<{
+        medicine_name: string;
+        dose: string;
+        frequency: string;
+        duration: string;
+        route?: string;
+        food_instruction?: string;
+      }>;
+      investigations?: Array<{
+        test_name: string;
+        urgency?: string;
+        preparation_instructions?: string;
+      }>;
+      red_flags?: string[];
+      follow_up_in?: string;
+      follow_up_date?: string;
+      doctor_notes?: string;
+      chief_complaint?: string;
+      data_gaps?: string[];
     };
     tags?: string[];
     appointment_types?: string[];
