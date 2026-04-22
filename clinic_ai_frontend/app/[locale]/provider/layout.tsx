@@ -33,6 +33,7 @@ const navItems: NavItem[] = [
   { href: '/provider/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/provider/calendar', label: 'Calendar', icon: Calendar },
   { href: '/provider/visits', label: 'Visits', icon: Stethoscope },
+  { href: '/provider/patients', label: 'Patients', icon: User },
   { href: '/provider/templates', label: 'Templates', icon: FileText },
   { href: '/provider/settings', label: 'Settings', icon: Settings },
 ];
@@ -65,10 +66,11 @@ export default function ProviderLayout({
   };
 
   const isActive = (href: string) => {
+    const currentPath = pathname || '';
     if (href === '/provider/dashboard') {
-      return pathname === '/provider/dashboard';
+      return currentPath === '/provider/dashboard';
     }
-    return pathname.startsWith(href);
+    return currentPath.startsWith(href);
   };
 
   // Show nothing until we've confirmed auth status to prevent flicker

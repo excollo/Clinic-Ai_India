@@ -94,6 +94,7 @@ class Settings:
     local_audio_storage_path: str = os.getenv("LOCAL_AUDIO_STORAGE_PATH", "/tmp/clinic_audio")
     mongo_audio_bucket_name: str = os.getenv("MONGO_AUDIO_BUCKET_NAME", "audio_blobs")
     default_note_type: str = os.getenv("DEFAULT_NOTE_TYPE", "india_clinical")
+    encryption_key: str = os.getenv("ENCRYPTION_KEY", "")
     jwt_secret_key: str = os.getenv("JWT_SECRET_KEY", "change-this-in-production")
     jwt_algorithm: str = os.getenv("JWT_ALGORITHM", "HS256")
     access_token_expire_minutes: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))

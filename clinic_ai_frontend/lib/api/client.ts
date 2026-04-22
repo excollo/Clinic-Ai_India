@@ -405,12 +405,21 @@ class APIClient {
     gender: string;
     preferred_language: 'en' | 'hi' | 'en_US';
     travelled_recently: boolean;
-    constant: boolean;
+    consent: boolean;
+    workflow_type?: string;
+    country?: string;
+    emergency_contact?: string;
+    address?: string;
+    appointment_date?: string;
+    appointment_time?: string;
+    visit_type?: string;
   }) {
     const response = await this.client.post('/api/patients/register', data);
     return response.data as {
       patient_id: string;
+      visit_id: string;
       whatsapp_triggered: boolean;
+      existing_patient: boolean;
     };
   }
 

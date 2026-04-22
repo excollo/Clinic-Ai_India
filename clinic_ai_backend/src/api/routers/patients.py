@@ -1,12 +1,13 @@
 """Patient routes module."""
 from datetime import datetime, timezone
-from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException
 
 from src.adapters.db.mongo.client import get_database
 from src.application.services.intake_chat_service import IntakeChatService
-from src.application.utils.patient_identity import stable_patient_id
+from src.application.utils.patient_id_crypto import encode_patient_id, resolve_internal_patient_id
+from src.domain.value_objects.patient_id import PatientId
+from src.domain.value_objects.visit_id import VisitId
 from src.api.schemas.patient import (
     CreateVisitFromPatientRequest,
     CreateVisitFromPatientResponse,
@@ -30,20 +31,26 @@ def list_patients() -> list[PatientSummaryResponse]:
         name_parts = [part for part in full_name.split(" ") if part]
         first_name = name_parts[0] if name_parts else "Unknown"
         last_name = " ".join(name_parts[1:]) if len(name_parts) > 1 else ""
-        patient_id = str(record.get("patient_id") or "")
+        internal_patient_id = str(record.get("patient_id") or "")
         age = record.get("age")
         year = datetime.now(timezone.utc).year - age if isinstance(age, int) and age > 0 else 1970
         estimated_dob = f"{year:04d}-01-01"
+        opaque_patient_id = encode_patient_id(internal_patient_id) if internal_patient_id else ""
 
         patients.append(
             PatientSummaryResponse(
-                id=patient_id,
-                patient_id=patient_id,
+                id=opaque_patient_id,
+                patient_id=opaque_patient_id,
                 first_name=first_name,
                 last_name=last_name,
                 full_name=full_name or first_name,
                 date_of_birth=str(record.get("date_of_birth") or estimated_dob),
-                mrn=str(record.get("mrn") or patient_id),
+                mrn=str(record.get("mrn") or internal_patient_id),
+                age=record.get("age"),
+                gender=str(record.get("gender") or "").strip() or None,
+                phone_number=str(record.get("phone_number") or "").strip() or None,
+                created_at=str(record.get("created_at") or "") or None,
+                updated_at=str(record.get("updated_at") or "") or None,
             )
         )
 
@@ -53,29 +60,59 @@ def list_patients() -> list[PatientSummaryResponse]:
 @router.post("/register", response_model=PatientRegisterResponse)
 def register_patient(payload: PatientRegisterRequest) -> PatientRegisterResponse:
     """Register patient by hospital staff (visit workflow starts on New Visit creation)."""
-    patient_id = stable_patient_id(payload.name, payload.phone_number)
+    try:
+        # Reuse patient only when both name and phone map to same deterministic id.
+        internal_patient_id = PatientId.generate(payload.name, payload.phone_number)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    visit_id = VisitId.validate(VisitId.generate())
     now = datetime.now(timezone.utc)
+    scheduled_start = None
+    if payload.appointment_date and payload.appointment_time:
+        scheduled_start = f"{payload.appointment_date}T{payload.appointment_time}:00"
     db = get_database()
+    existing_patient = db.patients.find_one({"patient_id": internal_patient_id}) is not None
     db.patients.update_one(
-        {"patient_id": patient_id},
+        {"patient_id": internal_patient_id},
         {
             "$set": {
-                "patient_id": patient_id,
+                "patient_id": internal_patient_id,
                 "name": payload.name,
                 "phone_number": payload.phone_number.strip(),
                 "age": payload.age,
                 "gender": payload.gender,
                 "preferred_language": payload.preferred_language,
                 "travelled_recently": payload.travelled_recently,
-                "constant": payload.constant,
+                "consent": payload.consent,
+                "workflow_type": payload.workflow_type,
+                "country": payload.country,
+                "emergency_contact": payload.emergency_contact,
+                "address": payload.address,
                 "updated_at": now,
             },
             "$setOnInsert": {"created_at": now},
         },
         upsert=True,
     )
+    db.visits.insert_one(
+        {
+            "visit_id": visit_id,
+            "patient_id": internal_patient_id,
+            "provider_id": None,
+            "scheduled_start": scheduled_start,
+            "visit_type": payload.visit_type,
+            "status": "open",
+            "created_at": now,
+            "updated_at": now,
+        }
+    )
 
-    return PatientRegisterResponse(patient_id=patient_id, whatsapp_triggered=True)
+    return PatientRegisterResponse(
+        patient_id=encode_patient_id(internal_patient_id),
+        visit_id=visit_id,
+        whatsapp_triggered=True,
+        existing_patient=existing_patient,
+    )
 
 
 @router.post("/{patient_id}/visits", response_model=CreateVisitFromPatientResponse)
@@ -84,20 +121,18 @@ def create_visit_from_existing_patient(
     payload: CreateVisitFromPatientRequest,
 ) -> CreateVisitFromPatientResponse:
     """Create a new open visit for an existing patient and trigger intake on this visit_id."""
+    internal_patient_id = resolve_internal_patient_id(patient_id, allow_raw_fallback=True)
     db = get_database()
-    patient = db.patients.find_one(
-        {"patient_id": patient_id},
-        {"_id": 0, "patient_id": 1, "phone_number": 1, "preferred_language": 1},
-    )
+    patient = db.patients.find_one({"patient_id": internal_patient_id})
     if not patient:
         raise HTTPException(status_code=404, detail="Patient not found")
 
-    visit_id = str(uuid4())
+    visit_id = VisitId.validate(VisitId.generate())
     now = datetime.now(timezone.utc)
     db.visits.insert_one(
         {
             "visit_id": visit_id,
-            "patient_id": patient_id,
+            "patient_id": internal_patient_id,
             "provider_id": payload.provider_id,
             "scheduled_start": payload.scheduled_start,
             "status": "open",
@@ -110,7 +145,7 @@ def create_visit_from_existing_patient(
     phone_number = str(patient.get("phone_number") or "").strip()
     if phone_number:
         IntakeChatService().start_intake(
-            patient_id=patient_id,
+            patient_id=internal_patient_id,
             visit_id=visit_id,
             to_number=phone_number,
             language=str(patient.get("preferred_language") or "en"),
@@ -118,7 +153,7 @@ def create_visit_from_existing_patient(
         intake_triggered = True
 
     return CreateVisitFromPatientResponse(
-        patient_id=patient_id,
+        patient_id=encode_patient_id(internal_patient_id),
         visit_id=visit_id,
         status="open",
         scheduled_start=payload.scheduled_start,

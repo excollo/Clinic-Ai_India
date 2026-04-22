@@ -23,6 +23,7 @@ from src.api.schemas.audio import (
 from src.api.schemas.transcription_session import TranscriptionSessionResponse
 from src.application.services.dialogue_pii import scrub_dialogue_turns
 from src.application.services.structure_dialogue import structure_dialogue_from_transcript_sync
+from src.application.utils.patient_id_crypto import encode_patient_id, resolve_internal_patient_id
 from src.core.config import get_settings
 
 router = APIRouter(prefix="/api/notes", tags=["Transcription"])
@@ -51,9 +52,10 @@ async def upload_transcription_audio(
     speaker_mode: SpeakerMode = Form(default="two_speakers"),
 ) -> TranscriptionUploadAcceptedResponse:
     """Upload audio, create job and enqueue async processing (visit session when visit_id is set)."""
+    internal_patient_id = resolve_internal_patient_id(patient_id, allow_raw_fallback=True)
     db = get_database()
     previsit = db.pre_visit_summaries.find_one(
-        {"patient_id": patient_id, "visit_id": visit_id},
+        {"patient_id": internal_patient_id, "visit_id": visit_id},
         sort=[("updated_at", -1)],
     )
     if not previsit:
@@ -75,7 +77,7 @@ async def upload_transcription_audio(
     if settings.transcription_debug_bytes:
         _upload_log.info(
             "transcription_upload_multipart patient_id=%s visit_id=%s filename=%s bytes=%s content_type=%s",
-            patient_id,
+            internal_patient_id,
             visit_id,
             audio_file.filename,
             len(payload),
@@ -86,7 +88,7 @@ async def upload_transcription_audio(
     now = datetime.now(timezone.utc)
     audio_id = str(uuid4())
     job_id = str(uuid4())
-    logical_name = f"{patient_id}/{visit_id}/{audio_id}_{audio_file.filename}"
+    logical_name = f"{internal_patient_id}/{visit_id}/{audio_id}_{audio_file.filename}"
     storage_ref = TranscriptionAudioStore().upload_audio(
         blob_path=logical_name,
         audio_bytes=payload,
@@ -100,7 +102,7 @@ async def upload_transcription_audio(
     repo = AudioRepository()
     repo.create_audio_file(
         audio_id=audio_id,
-        patient_id=patient_id,
+        patient_id=internal_patient_id,
         visit_id=visit_id,
         storage_ref=storage_ref,
         bucket=settings.mongo_audio_bucket_name,
@@ -114,7 +116,7 @@ async def upload_transcription_audio(
     repo.create_job(
         job_id=job_id,
         audio_id=audio_id,
-        patient_id=patient_id,
+        patient_id=internal_patient_id,
         visit_id=visit_id,
         provider="azure_speech",
         noise_environment=noise_environment,
@@ -125,7 +127,7 @@ async def upload_transcription_audio(
     TranscriptionQueueProducer().enqueue(job_id)
 
     VisitTranscriptionRepository().upsert_queued(
-        patient_id=patient_id,
+        patient_id=internal_patient_id,
         visit_id=visit_id,
         job_id=job_id,
         audio_id=audio_id,
@@ -162,11 +164,12 @@ async def upload_transcription_audio(
                 exc,
             )
 
-    poll_hint = f"/api/notes/transcribe/status/{patient_id}/{visit_id}"
+    opaque_patient_id = encode_patient_id(internal_patient_id)
+    poll_hint = f"/api/notes/transcribe/status/{opaque_patient_id}/{visit_id}"
     return TranscriptionUploadAcceptedResponse(
         job_id=job_id,
         message_id=job_id,
-        patient_id=patient_id,
+        patient_id=opaque_patient_id,
         visit_id=visit_id,
         status="queued",
         received_at=now,
@@ -177,7 +180,7 @@ async def upload_transcription_audio(
 @router.get("/transcribe/status/{patient_id}/{visit_id}")
 def get_visit_transcription_status(patient_id: str, visit_id: str) -> dict:
     """Poll visit-scoped transcription status (transcript-bundle compatible fields)."""
-    internal_pid = unquote(patient_id)
+    internal_pid = resolve_internal_patient_id(unquote(patient_id), allow_raw_fallback=True)
     internal_vid = unquote(visit_id)
     repo = VisitTranscriptionRepository()
     session = repo.get_session(patient_id=internal_pid, visit_id=internal_vid)
@@ -250,7 +253,7 @@ def get_visit_transcription_status(patient_id: str, visit_id: str) -> dict:
 @router.get("/{patient_id}/visits/{visit_id}/dialogue", response_model=None)
 async def get_visit_transcription_dialogue(patient_id: str, visit_id: str) -> Response | TranscriptionSessionResponse:
     """Return transcript + optional structured dialogue; 202 with Retry-After while processing."""
-    internal_pid = unquote(patient_id)
+    internal_pid = resolve_internal_patient_id(unquote(patient_id), allow_raw_fallback=True)
     internal_vid = unquote(visit_id)
     repo = VisitTranscriptionRepository()
     session = repo.get_session(patient_id=internal_pid, visit_id=internal_vid)
@@ -285,7 +288,7 @@ async def get_visit_transcription_dialogue(patient_id: str, visit_id: str) -> Re
 @router.post("/{patient_id}/visits/{visit_id}/dialogue/structure")
 async def structure_visit_dialogue(patient_id: str, visit_id: str) -> JSONResponse:
     """Structure stored transcript into Doctor/Patient JSON and scrub PII; persists on the visit session."""
-    internal_pid = unquote(patient_id)
+    internal_pid = resolve_internal_patient_id(unquote(patient_id), allow_raw_fallback=True)
     internal_vid = unquote(visit_id)
     vrepo = VisitTranscriptionRepository()
     session = vrepo.get_session(patient_id=internal_pid, visit_id=internal_vid)

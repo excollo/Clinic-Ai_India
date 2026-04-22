@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException, Query
 
 from src.adapters.db.mongo.client import get_database
+from src.application.utils.patient_id_crypto import encode_patient_id, resolve_internal_patient_id
 
 router = APIRouter(prefix="/api/contextai", tags=["ContextAI"])
 
@@ -96,10 +97,12 @@ def _extract_medications(previsit: dict | None, intake: dict | None) -> list[dic
 
 @router.get("/context/{patient_id}")
 def get_patient_context(patient_id: str, visit_id: str | None = Query(default=None)) -> dict:
-    patient = _get_patient_or_404(patient_id)
-    resolved_visit_id = _pick_visit_id(patient_id, visit_id)
-    intake = _get_latest_intake(patient_id, resolved_visit_id)
-    previsit = _get_latest_previsit(patient_id, resolved_visit_id)
+    internal_patient_id = resolve_internal_patient_id(patient_id, allow_raw_fallback=True)
+    opaque_patient_id = encode_patient_id(internal_patient_id)
+    patient = _get_patient_or_404(internal_patient_id)
+    resolved_visit_id = _pick_visit_id(internal_patient_id, visit_id)
+    intake = _get_latest_intake(internal_patient_id, resolved_visit_id)
+    previsit = _get_latest_previsit(internal_patient_id, resolved_visit_id)
     chief_complaint = _extract_chief_complaint(previsit, intake)
     has_intake_responses = bool((intake or {}).get("answers"))
     triage_level = (previsit or {}).get("triage_level")
@@ -113,12 +116,12 @@ def get_patient_context(patient_id: str, visit_id: str | None = Query(default=No
     birth_year = datetime.now(timezone.utc).year - age if isinstance(age, int) and age > 0 else 1970
 
     return {
-        "patient_id": patient_id,
+        "patient_id": opaque_patient_id,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "data_sources": ["patients"],
         "demographics": {
-            "patient_id": patient_id,
-            "mrn": str(patient.get("mrn") or patient_id),
+            "patient_id": opaque_patient_id,
+            "mrn": str(patient.get("mrn") or internal_patient_id),
             "first_name": first_name,
             "last_name": last_name,
             "date_of_birth": str(patient.get("date_of_birth") or f"{birth_year:04d}-01-01"),
@@ -159,9 +162,10 @@ def get_patient_context(patient_id: str, visit_id: str | None = Query(default=No
 
 @router.get("/risk-assessment/{patient_id}")
 def get_risk_assessment(patient_id: str) -> dict:
-    _get_patient_or_404(patient_id)
+    internal_patient_id = resolve_internal_patient_id(patient_id, allow_raw_fallback=True)
+    _get_patient_or_404(internal_patient_id)
     return {
-        "patient_id": patient_id,
+        "patient_id": encode_patient_id(internal_patient_id),
         "assessed_at": datetime.now(timezone.utc).isoformat(),
         "overall_risk_level": "moderate",
         "risk_scores": [
@@ -178,9 +182,10 @@ def get_risk_assessment(patient_id: str) -> dict:
 
 @router.get("/care-gaps/{patient_id}")
 def get_care_gaps(patient_id: str) -> dict:
-    _get_patient_or_404(patient_id)
+    internal_patient_id = resolve_internal_patient_id(patient_id, allow_raw_fallback=True)
+    _get_patient_or_404(internal_patient_id)
     return {
-        "patient_id": patient_id,
+        "patient_id": encode_patient_id(internal_patient_id),
         "gaps": [],
         "total_gaps": 0,
         "high_priority_count": 0,
@@ -190,13 +195,14 @@ def get_care_gaps(patient_id: str) -> dict:
 
 @router.get("/medication-review/{patient_id}")
 def get_medication_review(patient_id: str, visit_id: str | None = Query(default=None)) -> dict:
-    _get_patient_or_404(patient_id)
-    resolved_visit_id = _pick_visit_id(patient_id, visit_id)
-    intake = _get_latest_intake(patient_id, resolved_visit_id)
-    previsit = _get_latest_previsit(patient_id, resolved_visit_id)
+    internal_patient_id = resolve_internal_patient_id(patient_id, allow_raw_fallback=True)
+    _get_patient_or_404(internal_patient_id)
+    resolved_visit_id = _pick_visit_id(internal_patient_id, visit_id)
+    intake = _get_latest_intake(internal_patient_id, resolved_visit_id)
+    previsit = _get_latest_previsit(internal_patient_id, resolved_visit_id)
     medications = _extract_medications(previsit, intake)
     return {
-        "patient_id": patient_id,
+        "patient_id": encode_patient_id(internal_patient_id),
         "medications": medications,
         "interactions": [],
         "allergies": [],

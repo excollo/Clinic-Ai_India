@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException
 
 from src.adapters.db.mongo.client import get_database
+from src.application.utils.patient_id_crypto import encode_patient_id
 
 router = APIRouter(prefix="/api/visits", tags=["Visits"])
 
@@ -50,7 +51,7 @@ def list_provider_upcoming_visits(provider_id: str) -> dict:
         appointments.append(
             {
                 "appointment_id": str(visit.get("visit_id") or ""),
-                "patient_id": patient_id,
+                "patient_id": encode_patient_id(patient_id) if patient_id else "",
                 "patient_name": patient_name,
                 "scheduled_start": scheduled_start,
                 "chief_complaint": chief_complaint or "Visit",
@@ -83,7 +84,7 @@ def get_visit(visit_id: str) -> dict:
     resolved_chief_complaint = visit.get("chief_complaint") or _extract_chief_complaint(db, patient_id, visit_id)
     return {
         "id": str(visit.get("visit_id") or visit_id),
-        "patient_id": patient_id,
+        "patient_id": encode_patient_id(patient_id) if patient_id else "",
         "provider_id": str(visit.get("provider_id") or ""),
         "appointment_id": visit.get("appointment_id"),
         "visit_type": str(visit.get("visit_type") or "Visit"),
@@ -97,7 +98,7 @@ def get_visit(visit_id: str) -> dict:
         "assessment": visit.get("assessment"),
         "plan": visit.get("plan"),
         "patient": {
-            "id": patient_id,
+            "id": encode_patient_id(patient_id) if patient_id else "",
             "first_name": first_name,
             "last_name": last_name,
             "date_of_birth": str(patient.get("date_of_birth") or f"{year:04d}-01-01"),

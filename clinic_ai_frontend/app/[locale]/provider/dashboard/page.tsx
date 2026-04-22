@@ -223,9 +223,9 @@ export default function ProviderDashboardPage() {
                 <Stethoscope className="w-4 h-4 mr-2" /> CarePrep
               </Button>
             </Link>
-            <Link href="/provider/visits/new">
+            <Link href="/provider/registered-patients">
               <Button variant="primary" size="sm" className="bg-purple-600 hover:bg-purple-700">
-                <Plus className="w-4 h-4 mr-2" /> New Visit
+                <Plus className="w-4 h-4 mr-2" /> New Patient
               </Button>
             </Link>
           </div>
@@ -426,10 +426,10 @@ export default function ProviderDashboardPage() {
                   </CardTitle>
                   <CardDescription>Documentation status for recent encounters</CardDescription>
                 </div>
-                <Link href="/provider/visits/new">
+                <Link href="/provider/registered-patients">
                   <Button variant="primary" size="sm" className="bg-purple-600 hover:bg-purple-700">
                     <Plus className="w-4 h-4 mr-2" />
-                    Start New Visit
+                    New Patient
                   </Button>
                 </Link>
               </div>

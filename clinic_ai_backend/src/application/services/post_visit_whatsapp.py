@@ -60,10 +60,9 @@ def send_post_visit_summary_whatsapp(*, patient: dict, whatsapp_payload: str) ->
     if not (settings.whatsapp_access_token or "").strip() or not (settings.whatsapp_phone_number_id or "").strip():
         logger.info("post_visit_whatsapp_skipped reason=no_meta_credentials")
         return False
-    template = (settings.whatsapp_post_visit_template_name or "").strip()
-    if not template:
-        template = (settings.whatsapp_intake_template_name or "").strip()
-    if not template:
+    primary_template = (settings.whatsapp_post_visit_template_name or "").strip()
+    fallback_template = (settings.whatsapp_intake_template_name or "").strip()
+    if not primary_template and not fallback_template:
         logger.info("post_visit_whatsapp_skipped reason=no_template_configured")
         return False
     raw_phone = str(patient.get("phone_number") or "").strip()
@@ -72,25 +71,57 @@ def send_post_visit_summary_whatsapp(*, patient: dict, whatsapp_payload: str) ->
         logger.info("post_visit_whatsapp_skipped reason=no_patient_phone")
         return False
     lang = str(patient.get("preferred_language") or "en").strip().lower()
-    language_code = (
-        settings.whatsapp_post_visit_template_lang_hi
-        if lang == "hi"
-        else settings.whatsapp_post_visit_template_lang_en
-    )
+    language_codes: list[str] = []
+    if lang == "hi":
+        language_codes = [
+            str(settings.whatsapp_post_visit_template_lang_hi or "").strip(),
+            str(settings.whatsapp_intake_template_lang_hi or "").strip(),
+            "hi_IN",
+            "hi",
+        ]
+    else:
+        language_codes = [
+            str(settings.whatsapp_post_visit_template_lang_en or "").strip(),
+            str(settings.whatsapp_intake_template_lang_en or "").strip(),
+            "en_US",
+            "en",
+        ]
+    # Preserve order, drop blanks and duplicates.
+    language_codes = [c for i, c in enumerate(language_codes) if c and c not in language_codes[:i]]
     param_count = max(0, int(settings.whatsapp_post_visit_template_param_count))
     body = (whatsapp_payload or "").strip()
     body_values = [body[:900]] if param_count > 0 and body else []
-    try:
-        MetaWhatsAppClient().send_template(
-            to_number=to_number,
-            template_name=template,
-            language_code=language_code,
-            body_values=body_values,
-        )
-        return True
-    except Exception as exc:
-        logger.warning("post_visit_whatsapp_failed error=%s", exc)
-        return False
+    candidate_templates: list[str] = []
+    if primary_template:
+        candidate_templates.append(primary_template)
+    if fallback_template and fallback_template not in candidate_templates:
+        candidate_templates.append(fallback_template)
+
+    body_variants: list[list[str]] = [body_values]
+    if body_values:
+        # Some templates don't define body params; retry without params.
+        body_variants.append([])
+
+    for template_name in candidate_templates:
+        for lang_code in language_codes:
+            for body_variant in body_variants:
+                try:
+                    MetaWhatsAppClient().send_template(
+                        to_number=to_number,
+                        template_name=template_name,
+                        language_code=lang_code,
+                        body_values=body_variant,
+                    )
+                    return True
+                except Exception as exc:
+                    logger.warning(
+                        "post_visit_whatsapp_failed template=%s lang=%s params=%d error=%s",
+                        template_name,
+                        lang_code,
+                        len(body_variant),
+                        exc,
+                    )
+    return False
 
 
 def send_immediate_follow_up_template_whatsapp(*, patient: dict, payload: dict, preferred_language: str) -> bool:

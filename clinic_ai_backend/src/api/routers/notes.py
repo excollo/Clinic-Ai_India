@@ -6,6 +6,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query
 
 from src.adapters.db.mongo.repositories.clinical_note_repository import ClinicalNoteRepository
+from src.application.utils.patient_id_crypto import encode_patient_id, resolve_internal_patient_id
 from src.api.schemas.notes import (
     ClinicalNoteTemplateRequest,
     NoteGenerateRequest,
@@ -23,6 +24,14 @@ from src.application.use_cases.send_post_visit_summary_whatsapp_to_patient impor
 from src.core.config import get_settings
 
 router = APIRouter(prefix="/api/notes", tags=["Notes"])
+
+
+def _encode_note_patient_id(doc: dict[str, Any]) -> dict[str, Any]:
+    out = dict(doc)
+    raw = str(out.get("patient_id") or "").strip()
+    if raw:
+        out["patient_id"] = encode_patient_id(raw)
+    return out
 
 
 def _build_clinical_note_template(*, doctor_type: str, language_style: str, region: str, optional_preferences: str | None) -> dict[str, Any]:
@@ -99,6 +108,7 @@ def get_clinical_note_template(body: ClinicalNoteTemplateRequest) -> dict[str, A
 @router.post("/clinical-note", response_model=NoteGenerateResponse)
 def generate_clinical_note(request: NoteGenerateRequest) -> NoteGenerateResponse:
     """Generate clinical note (default note type)."""
+    request.patient_id = resolve_internal_patient_id(request.patient_id, allow_raw_fallback=True)
     default_type = get_settings().default_note_type
     note_type: NoteType = request.note_type or default_type
     return _generate_by_type(note_type=note_type, request=request)
@@ -113,7 +123,7 @@ def generate_india_note(request: NoteGenerateRequest) -> NoteGenerateResponse:
         force_regenerate=True,
         follow_up_date=request.follow_up_date,
     )
-    return NoteGenerateResponse(**doc)
+    return NoteGenerateResponse(**_encode_note_patient_id(doc))
 
 
 def generate_soap_note(request: NoteGenerateRequest) -> NoteGenerateResponse:
@@ -126,7 +136,7 @@ def generate_soap_note(request: NoteGenerateRequest) -> NoteGenerateResponse:
         )
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    return NoteGenerateResponse(**doc)
+    return NoteGenerateResponse(**_encode_note_patient_id(doc))
 
 
 @router.post("/post-visit-summary", response_model=NoteGenerateResponse)
@@ -144,7 +154,7 @@ def generate_post_visit_summary(request: NoteGenerateRequest) -> NoteGenerateRes
         detail = str(exc)
         status_code = 422 if "preferred_language" in detail else 404
         raise HTTPException(status_code=status_code, detail=detail) from exc
-    return NoteGenerateResponse(**doc)
+    return NoteGenerateResponse(**_encode_note_patient_id(doc))
 
 
 @router.get("/clinical-note", response_model=NoteGenerateResponse)
@@ -158,15 +168,16 @@ def get_latest_clinical_note(
 ) -> NoteGenerateResponse:
     """Fetch latest clinical note for a patient visit."""
     resolved_type: NoteType = note_type or get_settings().default_note_type
+    internal_patient_id = resolve_internal_patient_id(patient_id, allow_raw_fallback=True)
     note = ClinicalNoteRepository().find_latest(
-        patient_id=patient_id,
+        patient_id=internal_patient_id,
         visit_id=visit_id,
         note_type=resolved_type,
     )
     if not note:
         raise HTTPException(status_code=404, detail=f"No {resolved_type} note found")
     note.pop("_id", None)
-    return NoteGenerateResponse(**note)
+    return NoteGenerateResponse(**_encode_note_patient_id(note))
 
 
 @router.post(
@@ -180,10 +191,12 @@ def send_post_visit_summary_whatsapp_route(
     """Send latest saved post-visit summary template plus immediate Meta follow-up template."""
     try:
         result = send_latest_post_visit_summary_whatsapp_to_patient(
-            patient_id=body.patient_id,
+            patient_id=resolve_internal_patient_id(body.patient_id, allow_raw_fallback=True),
             visit_id=body.visit_id,
             phone_number_override=body.phone_number,
         )
+        if result.get("patient_id"):
+            result["patient_id"] = encode_patient_id(str(result["patient_id"]))
         return PostVisitWhatsAppSendResponse(**result)
     except ValueError as exc:
         detail = str(exc)
@@ -202,15 +215,16 @@ def get_latest_post_visit_summary(
     visit_id: str = Query(min_length=1),
 ) -> NoteGenerateResponse:
     """Fetch latest post-visit summary note for a patient visit."""
+    internal_patient_id = resolve_internal_patient_id(patient_id, allow_raw_fallback=True)
     note = ClinicalNoteRepository().find_latest(
-        patient_id=patient_id,
+        patient_id=internal_patient_id,
         visit_id=visit_id,
         note_type="post_visit_summary",
     )
     if not note:
         raise HTTPException(status_code=404, detail="No post_visit_summary note found")
     note.pop("_id", None)
-    return NoteGenerateResponse(**note)
+    return NoteGenerateResponse(**_encode_note_patient_id(note))
 
 
 def _generate_by_type(*, note_type: NoteType, request: NoteGenerateRequest) -> NoteGenerateResponse:
@@ -228,4 +242,4 @@ def _generate_by_type(*, note_type: NoteType, request: NoteGenerateRequest) -> N
         )
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    return NoteGenerateResponse(**doc)
+    return NoteGenerateResponse(**_encode_note_patient_id(doc))

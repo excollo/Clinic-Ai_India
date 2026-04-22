@@ -12,7 +12,15 @@ class PatientRegisterRequest(BaseModel):
     gender: str = Field(min_length=1, max_length=20)
     preferred_language: str = Field(default="en")
     travelled_recently: bool = Field(default=False)
-    constant: bool = Field(default=True)
+    consent: bool = Field(default=True)
+    # Optional appointment-style fields from registration UI
+    workflow_type: str | None = None
+    country: str | None = None
+    emergency_contact: str | None = None
+    address: str | None = None
+    appointment_date: str | None = None
+    appointment_time: str | None = None
+    visit_type: str | None = None
 
     @field_validator("preferred_language")
     @classmethod
@@ -30,7 +38,9 @@ class PatientRegisterResponse(BaseModel):
     """Response body for registration endpoint."""
 
     patient_id: str
+    visit_id: str
     whatsapp_triggered: bool
+    existing_patient: bool = False
 
 
 class PatientSummaryResponse(BaseModel):
@@ -43,6 +53,11 @@ class PatientSummaryResponse(BaseModel):
     full_name: str
     date_of_birth: str
     mrn: str
+    age: int | None = None
+    gender: str | None = None
+    phone_number: str | None = None
+    created_at: str | None = None
+    updated_at: str | None = None
 
 
 class CreateVisitFromPatientRequest(BaseModel):
