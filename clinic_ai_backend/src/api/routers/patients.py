@@ -132,7 +132,8 @@ def register_patient(payload: PatientRegisterRequest) -> PatientRegisterResponse
     )
     whatsapp_triggered = False
     phone_number = str(payload.phone_number or "").strip()
-    if phone_number:
+    pending_schedule_for_intake = scheduled_start is None
+    if scheduled_start and phone_number:
         try:
             IntakeChatService().start_intake(
                 patient_id=internal_patient_id,
@@ -149,6 +150,7 @@ def register_patient(payload: PatientRegisterRequest) -> PatientRegisterResponse
         visit_id=visit_id,
         whatsapp_triggered=whatsapp_triggered,
         existing_patient=existing_patient,
+        pending_schedule_for_intake=pending_schedule_for_intake,
     )
 
 
@@ -180,14 +182,18 @@ def create_visit_from_existing_patient(
 
     intake_triggered = False
     phone_number = str(patient.get("phone_number") or "").strip()
-    if phone_number:
-        IntakeChatService().start_intake(
-            patient_id=internal_patient_id,
-            visit_id=visit_id,
-            to_number=phone_number,
-            language=str(patient.get("preferred_language") or "en"),
-        )
-        intake_triggered = True
+    pending_schedule_for_intake = not (payload.scheduled_start and str(payload.scheduled_start).strip())
+    if not pending_schedule_for_intake and phone_number:
+        try:
+            IntakeChatService().start_intake(
+                patient_id=internal_patient_id,
+                visit_id=visit_id,
+                to_number=phone_number,
+                language=str(patient.get("preferred_language") or "en"),
+            )
+            intake_triggered = True
+        except Exception:
+            intake_triggered = False
 
     return CreateVisitFromPatientResponse(
         patient_id=encode_patient_id(internal_patient_id),
@@ -195,4 +201,5 @@ def create_visit_from_existing_patient(
         status="open",
         scheduled_start=payload.scheduled_start,
         intake_triggered=intake_triggered,
+        pending_schedule_for_intake=pending_schedule_for_intake,
     )

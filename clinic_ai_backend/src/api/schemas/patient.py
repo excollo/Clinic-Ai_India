@@ -41,6 +41,7 @@ class PatientRegisterResponse(BaseModel):
     visit_id: str
     whatsapp_triggered: bool
     existing_patient: bool = False
+    pending_schedule_for_intake: bool = False
 
 
 class PatientSummaryResponse(BaseModel):
@@ -75,3 +76,25 @@ class CreateVisitFromPatientResponse(BaseModel):
     status: str
     scheduled_start: str | None = None
     intake_triggered: bool = False
+    pending_schedule_for_intake: bool = False
+
+
+class ScheduleVisitIntakeRequest(BaseModel):
+    """Set appointment datetime on a visit and start WhatsApp intake (if eligible)."""
+
+    appointment_date: str = Field(min_length=10, max_length=10)
+    appointment_time: str = Field(
+        min_length=5,
+        max_length=5,
+        description="24-hour local time HH:MM (same format as patient registration).",
+    )
+
+
+class ScheduleVisitIntakeResponse(BaseModel):
+    """Result of scheduling + optional intake kickoff."""
+
+    visit_id: str
+    patient_id: str
+    scheduled_start: str
+    whatsapp_triggered: bool
+    intake_skipped_existing_session: bool = False

@@ -1,9 +1,11 @@
 """Visit routes module."""
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, HTTPException
 
 from src.adapters.db.mongo.client import get_database
+from src.api.schemas.patient import ScheduleVisitIntakeRequest, ScheduleVisitIntakeResponse
+from src.application.services.intake_chat_service import IntakeChatService
 from src.application.utils.patient_id_crypto import encode_patient_id
 
 router = APIRouter(prefix="/api/visits", tags=["Visits"])
@@ -30,6 +32,89 @@ def _extract_chief_complaint(db, patient_id: str, visit_id: str) -> str | None:
         if str(answer.get("question", "")).lower() == "illness" and answer.get("answer"):
             return str(answer.get("answer"))
     return None
+
+
+def _appointment_time_valid(value: str) -> bool:
+    parts = (value or "").strip().split(":")
+    if len(parts) != 2:
+        return False
+    hour, minute = parts[0], parts[1]
+    if len(hour) != 2 or len(minute) != 2 or not hour.isdigit() or not minute.isdigit():
+        return False
+    return 0 <= int(hour) <= 23 and 0 <= int(minute) <= 59
+
+
+def _intake_send_allowed(db, visit_id: str) -> tuple[bool, bool]:
+    """Return (allow_whatsapp_intake, skipped_due_to_existing_session)."""
+    session = db.intake_sessions.find_one({"visit_id": visit_id}, sort=[("updated_at", -1)])
+    if not session:
+        return True, False
+    status = str(session.get("status") or "")
+    if status == "stopped":
+        return True, False
+    return False, True
+
+
+@router.post("/{visit_id}/schedule-intake", response_model=ScheduleVisitIntakeResponse)
+def schedule_visit_and_send_intake(visit_id: str, payload: ScheduleVisitIntakeRequest) -> ScheduleVisitIntakeResponse:
+    """Attach appointment time to a visit and start WhatsApp intake when appropriate."""
+    if not _appointment_time_valid(payload.appointment_time):
+        raise HTTPException(status_code=422, detail="appointment_time must be HH:MM in 24-hour format")
+
+    try:
+        chosen = datetime.strptime(payload.appointment_date, "%Y-%m-%d").date()
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="appointment_date must be YYYY-MM-DD") from exc
+
+    today = datetime.now(timezone.utc).date()
+    if chosen < today or chosen > today + timedelta(days=7):
+        raise HTTPException(
+            status_code=422,
+            detail="appointment_date must be between today and the next 7 days",
+        )
+
+    scheduled_start = f"{payload.appointment_date}T{payload.appointment_time}:00"
+    db = get_database()
+    # Avoid Mongo $or here so in-memory test doubles can match visits.
+    visit = db.visits.find_one({"visit_id": visit_id}) or db.visits.find_one({"id": visit_id})
+    if not visit:
+        raise HTTPException(status_code=404, detail="Visit not found")
+
+    resolved_visit_id = str(visit.get("visit_id") or visit.get("id") or visit_id)
+    internal_patient_id = str(visit.get("patient_id") or "")
+    if not internal_patient_id:
+        raise HTTPException(status_code=422, detail="Visit has no patient_id")
+
+    now = datetime.now(timezone.utc)
+    update_query = {"visit_id": resolved_visit_id} if visit.get("visit_id") else {"id": resolved_visit_id}
+    db.visits.update_one(
+        update_query,
+        {"$set": {"scheduled_start": scheduled_start, "updated_at": now}},
+    )
+
+    patient = db.patients.find_one({"patient_id": internal_patient_id}) or {}
+    phone_number = str(patient.get("phone_number") or "").strip()
+    allow_intake, skipped = _intake_send_allowed(db, resolved_visit_id)
+    whatsapp_triggered = False
+    if allow_intake and phone_number:
+        try:
+            IntakeChatService().start_intake(
+                patient_id=internal_patient_id,
+                visit_id=resolved_visit_id,
+                to_number=phone_number,
+                language=str(patient.get("preferred_language") or "en"),
+            )
+            whatsapp_triggered = True
+        except Exception:
+            whatsapp_triggered = False
+
+    return ScheduleVisitIntakeResponse(
+        visit_id=resolved_visit_id,
+        patient_id=encode_patient_id(internal_patient_id),
+        scheduled_start=scheduled_start,
+        whatsapp_triggered=whatsapp_triggered,
+        intake_skipped_existing_session=skipped,
+    )
 
 
 @router.get("/provider/{provider_id}/upcoming")
