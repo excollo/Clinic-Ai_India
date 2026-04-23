@@ -25,12 +25,32 @@ export default function TemplatePreviewModal({
     setTimeout(() => setCopiedSection(null), 2000);
   };
 
-  const sections = [
-    { key: 'subjective', label: 'Subjective', content: template.content.subjective, color: 'blue' },
-    { key: 'objective', label: 'Objective', content: template.content.objective, color: 'purple' },
-    { key: 'assessment', label: 'Assessment', content: template.content.assessment, color: 'amber' },
-    { key: 'plan', label: 'Plan', content: template.content.plan, color: 'forest' }
-  ];
+  const renderPreviewField = (key: string, label: string, content: string) => (
+    <div className="border border-slate-200 rounded-xl overflow-hidden">
+      <div className="bg-slate-50 px-4 py-3 flex items-center justify-between border-b border-slate-200">
+        <h3 className="font-semibold text-slate-800">{label}</h3>
+        <button
+          onClick={() => handleCopy(key, content)}
+          className="text-slate-600 hover:text-slate-800 transition-colors flex items-center gap-1 text-sm"
+        >
+          {copiedSection === key ? (
+            <>
+              <Check className="w-4 h-4" />
+              Copied
+            </>
+          ) : (
+            <>
+              <Copy className="w-4 h-4" />
+              Copy
+            </>
+          )}
+        </button>
+      </div>
+      <div className="p-4 bg-white">
+        <pre className="text-sm text-slate-700 whitespace-pre-wrap font-sans">{content}</pre>
+      </div>
+    </div>
+  );
 
   return (
     <div
@@ -80,42 +100,53 @@ export default function TemplatePreviewModal({
         {/* Content */}
         <div className="flex-1 overflow-y-auto p-6">
           <div className="space-y-6">
-            {sections.map((section) => (
-              <div
-                key={section.key}
-                className="border border-slate-200 rounded-xl overflow-hidden"
-              >
-                {/* Section Header */}
-                <div className={`bg-${section.color}-50 px-4 py-3 flex items-center justify-between border-b border-${section.color}-100`}>
-                  <h3 className={`font-semibold text-${section.color}-900`}>
-                    {section.label}
-                  </h3>
-                  <button
-                    onClick={() => handleCopy(section.key, section.content)}
-                    className={`text-${section.color}-600 hover:text-${section.color}-700 transition-colors flex items-center gap-1 text-sm`}
-                  >
-                    {copiedSection === section.key ? (
-                      <>
-                        <Check className="w-4 h-4" />
-                        Copied
-                      </>
-                    ) : (
-                      <>
-                        <Copy className="w-4 h-4" />
-                        Copy
-                      </>
-                    )}
-                  </button>
+            <div className="p-4 bg-slate-50 rounded-lg border border-slate-200">
+              <h4 className="font-semibold text-slate-900 mb-3">Basic Information</h4>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+                <div>
+                  <p className="text-slate-600">Template Name</p>
+                  <p className="font-medium text-slate-900">{template.name}</p>
                 </div>
-
-                {/* Section Content */}
-                <div className="p-4 bg-white">
-                  <pre className="text-sm text-slate-700 whitespace-pre-wrap font-sans">
-                    {section.content}
-                  </pre>
+                <div>
+                  <p className="text-slate-600">Category</p>
+                  <p className="font-medium text-slate-900">{template.metadata.category}</p>
+                </div>
+                <div className="md:col-span-2">
+                  <p className="text-slate-600">Description</p>
+                  <p className="font-medium text-slate-900">{template.description || '-'}</p>
+                </div>
+                <div>
+                  <p className="text-slate-600">Specialty</p>
+                  <p className="font-medium text-slate-900">{template.metadata.specialty || '-'}</p>
                 </div>
               </div>
-            ))}
+            </div>
+
+            <div className="space-y-3">
+              <h4 className="font-semibold text-slate-900">Clinical Template Content</h4>
+              {renderPreviewField('doctor_notes', 'Doctor Notes', template.content.doctor_notes || template.content.subjective || '')}
+              {renderPreviewField('chief_complaint', 'Chief Complaint', template.content.chief_complaint || template.content.objective || '')}
+              {renderPreviewField('assessment', 'Assessment', template.content.assessment || '')}
+              {renderPreviewField('plan', 'Plan', template.content.plan || '')}
+              {renderPreviewField('follow_up_in', 'Follow Up In', template.content.follow_up_in || '-')}
+              {renderPreviewField('follow_up_date', 'Follow Up Date', template.content.follow_up_date || '-')}
+              {renderPreviewField(
+                'red_flags',
+                'Red Flags',
+                (template.content.red_flags || []).length ? (template.content.red_flags || []).join('\n') : '-',
+              )}
+              {renderPreviewField(
+                'data_gaps',
+                'Data Gaps',
+                (template.content.data_gaps || []).length ? (template.content.data_gaps || []).join('\n') : '-',
+              )}
+              {renderPreviewField('rx', 'rx (JSON array)', JSON.stringify(template.content.rx || [], null, 2))}
+              {renderPreviewField(
+                'investigations',
+                'investigations (JSON array)',
+                JSON.stringify(template.content.investigations || [], null, 2),
+              )}
+            </div>
           </div>
 
           {/* Metadata */}

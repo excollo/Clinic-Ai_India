@@ -29,6 +29,7 @@ export default function TemplatesPage() {
   const [totalCounts, setTotalCounts] = useState({ my: 0, practice: 0, community: 0 });
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [publishingTemplate, setPublishingTemplate] = useState<SOAPTemplate | null>(null);
+  const [editingTemplate, setEditingTemplate] = useState<SOAPTemplate | null>(null);
 
   // Fetch templates on component mount and when tab changes
   useEffect(() => {
@@ -63,6 +64,14 @@ export default function TemplatesPage() {
           objective: item.content.objective || item.content.chief_complaint || '',
           assessment: item.content.assessment || '',
           plan: item.content.plan || '',
+          doctor_notes: item.content.doctor_notes || item.content.subjective || '',
+          chief_complaint: item.content.chief_complaint || item.content.objective || '',
+          follow_up_in: item.content.follow_up_in || '',
+          follow_up_date: item.content.follow_up_date || '',
+          red_flags: item.content.red_flags || [],
+          data_gaps: item.content.data_gaps || [],
+          rx: item.content.rx || [],
+          investigations: item.content.investigations || [],
         },
         metadata: {
           tags: item.tags || [],
@@ -229,7 +238,10 @@ export default function TemplatesPage() {
             <Button
               variant="primary"
               leftIcon={<Plus className="w-5 h-5" />}
-              onClick={() => setShowCreateModal(true)}
+              onClick={() => {
+                setEditingTemplate(null);
+                setShowCreateModal(true);
+              }}
             >
               Create New Template
             </Button>
@@ -331,6 +343,10 @@ export default function TemplatesPage() {
                   onUse={handleUseTemplate}
                   onFavorite={handleFavorite}
                   onPublish={setPublishingTemplate}
+                  onEdit={(selected) => {
+                    setEditingTemplate(selected);
+                    setShowCreateModal(true);
+                  }}
                 />
               ))}
             </div>
@@ -351,7 +367,10 @@ export default function TemplatesPage() {
             <Button
               variant="primary"
               leftIcon={<Plus className="w-5 h-5" />}
-              onClick={() => setShowCreateModal(true)}
+              onClick={() => {
+                setEditingTemplate(null);
+                setShowCreateModal(true);
+              }}
             >
               Create New Template
             </Button>
@@ -371,12 +390,17 @@ export default function TemplatesPage() {
       {/* Create Template Modal */}
       {showCreateModal && (
         <CreateTemplateModal
-          onClose={() => setShowCreateModal(false)}
+          onClose={() => {
+            setShowCreateModal(false);
+            setEditingTemplate(null);
+          }}
+          templateToEdit={editingTemplate}
           onSuccess={() => {
             // Refresh templates after creation
             fetchTemplates();
             // Switch to "My Templates" tab to see the new template
             setActiveTab('my');
+            setEditingTemplate(null);
           }}
         />
       )}

@@ -12,7 +12,8 @@ import {
   Clock,
   Eye,
   Sparkles,
-  Globe
+  Globe,
+  Pencil
 } from 'lucide-react';
 
 interface TemplateCardProps {
@@ -21,6 +22,7 @@ interface TemplateCardProps {
   onUse?: (template: SOAPTemplate) => void;
   onFavorite?: (templateId: string) => void;
   onPublish?: (template: SOAPTemplate) => void;
+  onEdit?: (template: SOAPTemplate) => void;
 }
 
 export default function TemplateCard({
@@ -28,7 +30,8 @@ export default function TemplateCard({
   onPreview,
   onUse,
   onFavorite,
-  onPublish
+  onPublish,
+  onEdit
 }: TemplateCardProps) {
   const typeConfig = {
     personal: {
@@ -164,6 +167,17 @@ export default function TemplateCard({
               </Button>
             )}
           </div>
+          {onEdit && template.type !== 'community' && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="w-full"
+              leftIcon={<Pencil className="w-4 h-4" />}
+              onClick={() => onEdit(template)}
+            >
+              Edit Template
+            </Button>
+          )}
 
           {/* Publish Button - Only for personal templates not yet published */}
           {template.type === 'personal' && !template.metadata.isPublished && onPublish && (

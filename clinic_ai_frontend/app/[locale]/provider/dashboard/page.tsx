@@ -13,7 +13,6 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Calendar, Users, ListTodo, Plus, TrendingUp, Clock, FileText, Stethoscope, Edit3, Sparkles, ClipboardList, Send, Eye, AlertTriangle, Target, Activity } from "lucide-react";
 import Link from "next/link";
-import axios from 'axios';
 import toast from 'react-hot-toast';
 import { useAuthStore } from '@/lib/stores/authStore';
 import { apiClient } from '@/lib/api/client';
@@ -28,6 +27,8 @@ interface ScheduledAppointment {
   id: string;
   patient: { id: string; name: string };
   time: string;
+  scheduledStart?: string;
+  isScheduled: boolean;
   reason: string;
   isNewPatient: boolean;
   careprepStatus: CareprepStatus;
@@ -42,6 +43,7 @@ interface PatientListItem {
   lastSeen: string;
   appointReadyStatus: AppointReadyStatus;
   workflowVisitId?: string;
+  isScheduled: boolean;
 }
 
 interface ProviderTask {
@@ -59,6 +61,12 @@ interface RecentVisit {
   chiefComplaint: string;
   soapStatus: 'completed' | 'in_progress' | 'pending';
   visitId: string;
+}
+
+interface QuickTemplateItem {
+  id: string;
+  name: string;
+  description: string;
 }
 
 const LOCAL_APPOINTMENTS_KEY = 'provider_local_appointments';
@@ -95,6 +103,7 @@ export default function ProviderDashboardPage() {
   const [loading, setLoading] = useState(true);
   const [documentingAppointment, setDocumentingAppointment] = useState<string | null>(null);
   const [recentVisits, setRecentVisits] = useState<RecentVisit[]>([]);
+  const [quickTemplates, setQuickTemplates] = useState<QuickTemplateItem[]>([]);
 
   // Derived state
   const pendingSOAPNotes = 0; // TODO: Fetch from API
@@ -104,8 +113,9 @@ export default function ProviderDashboardPage() {
     id: appt.patient.id,
     name: appt.patient.name,
     lastSeen: "Today",
-    appointReadyStatus: "Ready", // Mock
+    appointReadyStatus: appt.isScheduled ? "Ready" : "Pending",
     workflowVisitId: appt.workflowVisitId,
+    isScheduled: appt.isScheduled,
   }));
 
   useEffect(() => {
@@ -123,13 +133,17 @@ export default function ProviderDashboardPage() {
               id: appt.patient_id,
               name: appt.patient_name || 'Unknown Patient'
             },
-            time: new Date(appt.scheduled_start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            time: appt.scheduled_start
+              ? new Date(appt.scheduled_start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+              : 'Not fixed',
+            scheduledStart: appt.scheduled_start,
+            isScheduled: Boolean(appt.scheduled_start),
             reason: appt.chief_complaint || 'General Visit',
             isNewPatient: appt.appointment_type === 'initial_consultation',
             careprepStatus: appt.previsit_completed ? 'completed' : 'not_sent', // Simple mapping
             riskLevel: 'medium', // Default
             careGapsCount: 0, // Default
-            workflowVisitId: undefined,
+            workflowVisitId: appt.visit_id || appt.appointment_id || appt.id,
           }));
           mergedAppointments.push(...mappedAppointments);
         }
@@ -146,7 +160,9 @@ export default function ProviderDashboardPage() {
           },
           time: item.scheduled_start
             ? new Date(item.scheduled_start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-            : '--:--',
+            : 'Not fixed',
+          scheduledStart: item.scheduled_start,
+          isScheduled: Boolean(item.scheduled_start),
           reason: item.type || 'Visit',
           isNewPatient: false,
           careprepStatus: 'not_sent' as CareprepStatus,
@@ -176,25 +192,47 @@ export default function ProviderDashboardPage() {
     setRecentVisits(mappedRecentVisits);
   }, [todaysSchedule]);
 
+  useEffect(() => {
+    const fetchQuickTemplates = async () => {
+      try {
+        const response = await apiClient.listTemplates({
+          type: 'personal',
+          page: 1,
+          page_size: 5,
+        });
+        const items: QuickTemplateItem[] = (response.items || []).map((item: any) => ({
+          id: item.id,
+          name: item.name || 'Untitled Template',
+          description: item.description || 'No description',
+        }));
+        setQuickTemplates(items);
+      } catch (error) {
+        console.error('Error fetching quick templates:', error);
+        setQuickTemplates([]);
+      }
+    };
+
+    fetchQuickTemplates();
+  }, []);
+
   const handleStartDocumentation = async (appointmentId: string) => {
     setDocumentingAppointment(appointmentId);
     try {
-      const token = localStorage.getItem('access_token');
-      const response = await axios.post(
-        `/api/visits/from-appointment/${appointmentId}`,
-        {},
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      router.push(`/provider/visits/${response.data.id}`);
+      // Open existing visit documentation directly by visit id.
+      router.push(`/provider/visits/${appointmentId}`);
     } catch (error: any) {
       console.error('Error starting visit documentation:', error);
-      toast.error(error.response?.data?.detail || 'Failed to start visit documentation');
+      toast.error(error.response?.data?.detail || 'Failed to open visit documentation');
     } finally {
       setDocumentingAppointment(null);
     }
   };
 
   const handleOpenAppointment = (appointment: ScheduledAppointment) => {
+    if (!appointment.isScheduled) {
+      toast.error('Appointment is not fixed yet. Please set it from Manage Appointments.');
+      return;
+    }
     if (appointment.workflowVisitId) {
       router.push(`/provider/visits/${appointment.workflowVisitId}`);
       return;
@@ -226,6 +264,11 @@ export default function ProviderDashboardPage() {
             <Link href="/provider/registered-patients">
               <Button variant="primary" size="sm" className="bg-purple-600 hover:bg-purple-700">
                 <Plus className="w-4 h-4 mr-2" /> New Patient
+              </Button>
+            </Link>
+            <Link href="/provider/manage-appointments">
+              <Button variant="outline" size="sm" className="bg-white/10 text-white hover:bg-white/20 border-white/20">
+                <Calendar className="w-4 h-4 mr-2" /> Manage Appointments
               </Button>
             </Link>
           </div>
@@ -305,7 +348,7 @@ export default function ProviderDashboardPage() {
           <CardContent className="p-6">
             <div className="flex items-start justify-between">
               <div className="flex-1">
-                <p className="text-sm text-slate-600 mb-1.5">SOAP Notes</p>
+                <p className="text-sm text-slate-600 mb-1.5">Clinical Notes</p>
                 <h3 className="text-3xl font-bold text-slate-900">{pendingSOAPNotes}</h3>
                 <p className="text-xs text-slate-600 mt-2">
                   {pendingSOAPNotes > 0 ? 'Pending docs' : 'All complete ✓'}
@@ -376,6 +419,9 @@ export default function ProviderDashboardPage() {
                           )}
                         </div>
                         <p className="text-sm text-gray-600">{appt.reason}</p>
+                        {!appt.isScheduled && (
+                          <p className="text-xs text-amber-700">Appointment is not fixed yet.</p>
+                        )}
                         <p className="text-xs text-gray-500">Visit ID: {appt.id}</p>
                       </div>
                     </div>
@@ -403,10 +449,10 @@ export default function ProviderDashboardPage() {
                       <Button
                         variant="outline"
                         size="sm"
-                        disabled={documentingAppointment === appt.id}
-                        onClick={() => appt.workflowVisitId ? router.push(`/provider/visits/${appt.workflowVisitId}`) : handleStartDocumentation(appt.id)}
+                        disabled={documentingAppointment === appt.id || !appt.isScheduled}
+                        onClick={() => handleStartDocumentation(appt.workflowVisitId || appt.id)}
                       >
-                        {documentingAppointment === appt.id ? 'Starting...' : appt.workflowVisitId ? 'Open Visit' : 'Document'}
+                        {!appt.isScheduled ? 'Fix Appointment First' : documentingAppointment === appt.id ? 'Opening...' : 'Open Visit'}
                       </Button>
                     </div>
                   </li>
@@ -415,14 +461,14 @@ export default function ProviderDashboardPage() {
             </CardContent>
           </Card>
 
-          {/* Recent Visits & SOAP Notes */}
+          {/* Recent Visits & Clinical Notes */}
           <Card>
             <CardHeader>
               <div className="flex items-center justify-between">
                 <div>
                   <CardTitle className="flex items-center gap-2">
                     <Stethoscope className="w-5 h-5 text-purple-600" />
-                    Recent Visits & SOAP Notes
+                    Recent Visits & Clinical Notes
                   </CardTitle>
                   <CardDescription>Documentation status for recent encounters</CardDescription>
                 </div>
@@ -499,9 +545,15 @@ export default function ProviderDashboardPage() {
                       <Button
                         variant="outline"
                         size="sm"
-                        onClick={() => p.workflowVisitId ? router.push(`/provider/visits/${p.workflowVisitId}`) : router.push('/provider/visits/new')}
+                        onClick={() => {
+                          if (!p.isScheduled) {
+                            toast.error('Appointment is not fixed yet. Please set it from Manage Appointments.');
+                            return;
+                          }
+                          p.workflowVisitId ? router.push(`/provider/visits/${p.workflowVisitId}`) : toast.error('Visit not available yet');
+                        }}
                       >
-                        {p.workflowVisitId ? 'Open Visit' : 'Next Step'}
+                        {!p.isScheduled ? 'Fix Appointment First' : p.workflowVisitId ? 'Open Visit' : 'Next Step'}
                       </Button>
                       <Link href={`/careprep/send/${p.id}`}>
                         <Button variant="ghost" size="sm" className="text-purple-600 hover:bg-purple-50 h-7 px-2">
@@ -563,14 +615,20 @@ export default function ProviderDashboardPage() {
             </CardHeader>
             <CardContent>
               <div className="space-y-2">
-                <div className="p-3 bg-white rounded-lg border border-amber-200 hover:border-amber-300 cursor-pointer">
-                  <p className="font-semibold text-sm text-slate-900">General Visit</p>
-                  <p className="text-xs text-slate-600">Standard SOAP template</p>
-                </div>
-                <div className="p-3 bg-white rounded-lg border border-amber-200 hover:border-amber-300 cursor-pointer">
-                  <p className="font-semibold text-sm text-slate-900">Annual Physical</p>
-                  <p className="text-xs text-slate-600">Comprehensive exam template</p>
-                </div>
+                {quickTemplates.length === 0 ? (
+                  <div className="p-3 bg-white rounded-lg border border-amber-200">
+                    <p className="text-xs text-slate-600">No templates yet. Create one to see it here.</p>
+                  </div>
+                ) : (
+                  quickTemplates.map((template) => (
+                    <Link key={template.id} href="/provider/templates" className="block">
+                      <div className="p-3 bg-white rounded-lg border border-amber-200 hover:border-amber-300 cursor-pointer">
+                        <p className="font-semibold text-sm text-slate-900 line-clamp-1">{template.name}</p>
+                        <p className="text-xs text-slate-600 line-clamp-2">{template.description}</p>
+                      </div>
+                    </Link>
+                  ))
+                )}
               </div>
               <Link href="/provider/templates">
                 <Button variant="primary" size="sm" className="w-full mt-4 bg-amber-600 hover:bg-amber-700">

@@ -143,7 +143,7 @@ export default function AnalyticsPage() {
                     <CardHeader>
                         <CardTitle>Clinical Documentation</CardTitle>
                         <CardDescription>
-                            Breakdown of documents generated (Transcripts, SOAP Notes, etc.)
+                            Breakdown of documents generated (Transcripts, Clinical Notes, etc.)
                         </CardDescription>
                     </CardHeader>
                     <CardContent className="h-[300px]">

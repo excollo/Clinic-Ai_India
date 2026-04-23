@@ -186,7 +186,7 @@ export default function RecordingControls({
             onTranscriptionComplete(jobId, transcriptText);
           }
           if (onGenerateSOAP) {
-            toast.success('Transcription complete! Click "Generate SOAP Notes".');
+            toast.success('Transcription complete! Click "Generate Clinical Notes".');
           }
           return;
         }
@@ -321,7 +321,7 @@ export default function RecordingControls({
             className="bg-blue-600 hover:bg-blue-700 text-white"
           >
             <Sparkles className="mr-2 h-4 w-4" />
-            Generate SOAP Notes
+            Generate Clinical Notes
           </Button>
 
           <span className="text-sm text-green-600 font-medium">

@@ -6,10 +6,12 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { apiClient } from '@/lib/api/client';
 import toast from 'react-hot-toast';
+import type { SOAPTemplate } from '@/lib/types/templates';
 
 interface CreateTemplateModalProps {
   onClose: () => void;
   onSuccess: () => void;
+  templateToEdit?: SOAPTemplate | null;
 }
 
 const CATEGORIES = [
@@ -35,18 +37,20 @@ const COMMON_APPOINTMENT_TYPES = [
 
 export default function CreateTemplateModal({
   onClose,
-  onSuccess
+  onSuccess,
+  templateToEdit
 }: CreateTemplateModalProps) {
+  const isEditMode = Boolean(templateToEdit);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formData, setFormData] = useState({
-    name: '',
-    description: '',
-    category: 'General',
-    specialty: '',
-    assessment: '',
-    plan: '',
-    doctor_notes: '',
-    chief_complaint: '',
+    name: templateToEdit?.name || '',
+    description: templateToEdit?.description || '',
+    category: templateToEdit?.metadata.category || 'General',
+    specialty: templateToEdit?.metadata.specialty || '',
+    assessment: templateToEdit?.content.assessment || '',
+    plan: templateToEdit?.content.plan || '',
+    doctor_notes: templateToEdit?.content.subjective || '',
+    chief_complaint: templateToEdit?.content.objective || '',
     follow_up_in: '',
     follow_up_date: '',
     red_flags: '',
@@ -54,9 +58,9 @@ export default function CreateTemplateModal({
     rx_json: '[\n  {\n    "medicine_name": "",\n    "dose": "",\n    "frequency": "",\n    "duration": "",\n    "route": "",\n    "food_instruction": ""\n  }\n]',
     investigations_json:
       '[\n  {\n    "test_name": "",\n    "urgency": "",\n    "preparation_instructions": ""\n  }\n]',
-    tags: [] as string[],
-    appointmentTypes: [] as string[],
-    isFavorite: false
+    tags: templateToEdit?.metadata.tags || [] as string[],
+    appointmentTypes: templateToEdit?.metadata.appointmentTypes || [] as string[],
+    isFavorite: Boolean(templateToEdit?.metadata.isFavorite)
   });
   const [tagInput, setTagInput] = useState('');
 
@@ -115,10 +119,9 @@ export default function CreateTemplateModal({
         .map((v) => v.trim())
         .filter(Boolean);
 
-      await apiClient.createTemplate({
+      const payload = {
         name: formData.name,
         description: formData.description,
-        type: 'personal',
         category: formData.category,
         specialty: formData.specialty,
         content: {
@@ -136,9 +139,18 @@ export default function CreateTemplateModal({
         tags: formData.tags,
         appointment_types: formData.appointmentTypes,
         is_favorite: formData.isFavorite,
-      });
+      };
 
-      toast.success('Template created successfully!');
+      if (isEditMode && templateToEdit) {
+        await apiClient.updateTemplate(templateToEdit.id, payload);
+        toast.success('Template updated successfully!');
+      } else {
+        await apiClient.createTemplate({
+          ...payload,
+          type: 'personal',
+        });
+        toast.success('Template created successfully!');
+      }
       onSuccess();
       onClose();
     } catch (error: any) {
@@ -164,8 +176,10 @@ export default function CreateTemplateModal({
         <div className="px-6 py-4 border-b border-slate-200">
           <div className="flex items-center justify-between">
             <div>
-              <h2 className="text-2xl font-bold text-slate-900">Create New Template</h2>
-              <p className="text-sm text-slate-600 mt-1">Build a reusable SOAP note template</p>
+              <h2 className="text-2xl font-bold text-slate-900">{isEditMode ? 'Edit Template' : 'Create New Template'}</h2>
+              <p className="text-sm text-slate-600 mt-1">
+                {isEditMode ? 'Update and save your clinical note template' : 'Build a reusable clinical note template'}
+              </p>
             </div>
             <button
               onClick={onClose}
@@ -467,7 +481,7 @@ export default function CreateTemplateModal({
             disabled={isSubmitting}
             leftIcon={isSubmitting ? <Loader2 className="w-4 h-4 animate-spin" /> : undefined}
           >
-            {isSubmitting ? 'Creating...' : 'Create Template'}
+            {isSubmitting ? (isEditMode ? 'Saving...' : 'Creating...') : (isEditMode ? 'Save Changes' : 'Create Template')}
           </Button>
         </div>
       </div>

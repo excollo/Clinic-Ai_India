@@ -68,7 +68,7 @@ export default function TemplateBrowserModal({
           <div className="flex items-center justify-between mb-4">
             <div>
               <h2 className="text-2xl font-bold text-slate-900">Browse Templates</h2>
-              <p className="text-sm text-slate-600 mt-1">Select a template to insert into your SOAP note</p>
+              <p className="text-sm text-slate-600 mt-1">Select a template to insert into your clinical note</p>
             </div>
             <button
               onClick={onClose}

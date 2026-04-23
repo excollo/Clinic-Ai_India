@@ -159,7 +159,7 @@
             "headline2": "Focus on Care.",
             "subheadline": "AI-powered documentation that works the way you do. Spend less time charting, more time with patients. Patient-centered, physician-driven.",
             "title": "AI-Powered Clinical Documentation",
-            "subtitle": "Reduce documentation time by 70% with intelligent medical transcription and SOAP note generation",
+            "subtitle": "Reduce documentation time by 70% with intelligent medical transcription and clinical note generation",
             "cta": "Start Free Trial",
             "secondaryCta": "Watch Demo"
         },
@@ -170,7 +170,7 @@
                 "description": "Real-time audio transcription with medical terminology accuracy"
             },
             "soapNotes": {
-                "title": "Smart SOAP Notes",
+                "title": "Smart Clinical Notes",
                 "description": "AI-generated clinical notes from patient conversations"
             },
             "carePrep": {
@@ -335,7 +335,7 @@
         "visit": {
             "startDocumentation": "Start Documentation",
             "viewHistory": "View History",
-            "generateNote": "Generate SOAP Note",
+            "generateNote": "Generate Clinical Note",
             "transcriptionActive": "Recording in progress...",
             "completeVisit": "Complete Visit"
         },

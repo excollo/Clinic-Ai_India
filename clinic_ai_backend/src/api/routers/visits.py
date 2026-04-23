@@ -84,6 +84,9 @@ def schedule_visit_and_send_intake(visit_id: str, payload: ScheduleVisitIntakeRe
     internal_patient_id = str(visit.get("patient_id") or "")
     if not internal_patient_id:
         raise HTTPException(status_code=422, detail="Visit has no patient_id")
+    visit_status = str(visit.get("status") or "open").strip().lower()
+    if visit_status in {"completed", "closed", "ended", "cancelled"}:
+        raise HTTPException(status_code=409, detail="Completed/cancelled visits cannot be rescheduled")
 
     now = datetime.now(timezone.utc)
     update_query = {"visit_id": resolved_visit_id} if visit.get("visit_id") else {"id": resolved_visit_id}
@@ -156,6 +159,7 @@ def list_provider_upcoming_visits(provider_id: str) -> dict:
                 "appointment_type": visit.get("visit_type") or "visit",
                 "previsit_completed": False,
                 "visit_id": resolved_visit_id,
+                "status": str(visit.get("status") or "open"),
             }
         )
 
@@ -212,4 +216,58 @@ def get_visit(visit_id: str) -> dict:
             "gender": str(patient.get("gender") or "unknown"),
             "phone_number": patient.get("phone_number"),
         },
+    }
+
+
+@router.get("/{visit_id}/intake-session")
+def get_visit_intake_session(visit_id: str) -> dict:
+    """Return latest intake session question/answer history for a visit."""
+    db = get_database()
+    visit = db.visits.find_one(
+        {
+            "$or": [
+                {"visit_id": visit_id},
+                {"id": visit_id},
+            ]
+        },
+        {"_id": 0},
+    )
+    if not visit:
+        raise HTTPException(status_code=404, detail="Visit not found")
+
+    resolved_visit_id = str(visit.get("visit_id") or visit.get("id") or visit_id)
+    intake = db.intake_sessions.find_one(
+        {"visit_id": resolved_visit_id},
+        sort=[("updated_at", -1)],
+    )
+    if not intake:
+        return {
+            "visit_id": resolved_visit_id,
+            "status": "not_started",
+            "question_answers": [],
+            "illness": None,
+            "updated_at": None,
+        }
+
+    normalized_answers: list[dict] = []
+    for item in intake.get("answers", []):
+        normalized_answers.append(
+            {
+                "question": str(item.get("question") or "").strip(),
+                "answer": str(item.get("answer") or "").strip(),
+                "topic": str(item.get("topic") or "").strip() or None,
+                "asked_at": item.get("asked_at"),
+                "answered_at": item.get("answered_at"),
+            }
+        )
+
+    patient_id = str(intake.get("patient_id") or visit.get("patient_id") or "")
+    return {
+        "visit_id": resolved_visit_id,
+        "patient_id": encode_patient_id(patient_id) if patient_id else "",
+        "status": str(intake.get("status") or "in_progress"),
+        "illness": intake.get("illness"),
+        "question_answers": normalized_answers,
+        "updated_at": intake.get("updated_at"),
+        "created_at": intake.get("created_at"),
     }

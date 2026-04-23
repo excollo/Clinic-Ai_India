@@ -105,7 +105,7 @@ export default function CommunityPage() {
               Community Template Library
             </h1>
             <p className="text-xl text-forest-200 max-w-3xl mx-auto">
-              Access hundreds of peer-reviewed SOAP note templates shared by healthcare professionals worldwide
+              Access hundreds of peer-reviewed clinical note templates shared by healthcare professionals worldwide
             </p>
           </div>
 

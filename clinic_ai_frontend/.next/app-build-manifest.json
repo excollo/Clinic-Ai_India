@@ -1,5 +1,10 @@
 {
   "pages": {
+    "/provider/dashboard/page": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/provider/dashboard/page.js"
+    ],
     "/layout": [
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",
@@ -22,15 +27,15 @@
       "static/css/app/[locale]/layout.css",
       "static/chunks/app/[locale]/layout.js"
     ],
-    "/[locale]/provider/registered-patients/page": [
+    "/provider/visits/[id]/page": [
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",
-      "static/chunks/app/[locale]/provider/registered-patients/page.js"
+      "static/chunks/app/provider/visits/[id]/page.js"
     ],
-    "/[locale]/provider/calendar/page": [
+    "/[locale]/provider/visits/[id]/page": [
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",
-      "static/chunks/app/[locale]/provider/calendar/page.js"
+      "static/chunks/app/[locale]/provider/visits/[id]/page.js"
     ],
     "/login/page": [
       "static/chunks/webpack.js",
@@ -42,55 +47,15 @@
       "static/chunks/main-app.js",
       "static/chunks/app/[locale]/login/page.js"
     ],
-    "/provider/dashboard/page": [
-      "static/chunks/webpack.js",
-      "static/chunks/main-app.js",
-      "static/chunks/app/provider/dashboard/page.js"
-    ],
-    "/provider/calendar/page": [
-      "static/chunks/webpack.js",
-      "static/chunks/main-app.js",
-      "static/chunks/app/provider/calendar/page.js"
-    ],
     "/provider/registered-patients/page": [
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",
       "static/chunks/app/provider/registered-patients/page.js"
     ],
-    "/provider/visits/new/page": [
+    "/[locale]/provider/registered-patients/page": [
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",
-      "static/chunks/app/provider/visits/new/page.js"
-    ],
-    "/[locale]/provider/visits/new/page": [
-      "static/chunks/webpack.js",
-      "static/chunks/main-app.js",
-      "static/chunks/app/[locale]/provider/visits/new/page.js"
-    ],
-    "/[locale]/page": [
-      "static/chunks/webpack.js",
-      "static/chunks/main-app.js",
-      "static/chunks/app/[locale]/page.js"
-    ],
-    "/provider/visits/[id]/page": [
-      "static/chunks/webpack.js",
-      "static/chunks/main-app.js",
-      "static/chunks/app/provider/visits/[id]/page.js"
-    ],
-    "/[locale]/provider/visits/[id]/page": [
-      "static/chunks/webpack.js",
-      "static/chunks/main-app.js",
-      "static/chunks/app/[locale]/provider/visits/[id]/page.js"
-    ],
-    "/provider/templates/page": [
-      "static/chunks/webpack.js",
-      "static/chunks/main-app.js",
-      "static/chunks/app/provider/templates/page.js"
-    ],
-    "/[locale]/provider/templates/page": [
-      "static/chunks/webpack.js",
-      "static/chunks/main-app.js",
-      "static/chunks/app/[locale]/provider/templates/page.js"
+      "static/chunks/app/[locale]/provider/registered-patients/page.js"
     ],
     "/provider/patients/page": [
       "static/chunks/webpack.js",
@@ -101,6 +66,46 @@
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",
       "static/chunks/app/[locale]/provider/patients/page.js"
+    ],
+    "/provider/calendar/page": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/provider/calendar/page.js"
+    ],
+    "/[locale]/provider/calendar/page": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/[locale]/provider/calendar/page.js"
+    ],
+    "/provider/templates/page": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/provider/templates/page.js"
+    ],
+    "/[locale]/page": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/[locale]/page.js"
+    ],
+    "/provider/manage-appointments/page": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/provider/manage-appointments/page.js"
+    ],
+    "/[locale]/provider/manage-appointments/page": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/[locale]/provider/manage-appointments/page.js"
+    ],
+    "/[locale]/provider/templates/page": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/[locale]/provider/templates/page.js"
+    ],
+    "/_not-found/page": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/_not-found/page.js"
     ]
   }
 }

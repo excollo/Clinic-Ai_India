@@ -47,7 +47,7 @@ const PLANS = [
       'Up to 10 users',
       'Up to 500 patients',
       'Basic AI assistant',
-      'SOAP note templates',
+      'Clinical note templates',
       'Email support',
     ],
   },

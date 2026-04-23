@@ -86,7 +86,7 @@ export default function RecentVisitsCard({ providerId }: { providerId: string })
           <div>
             <CardTitle className="flex items-center gap-2">
               <Stethoscope className="w-5 h-5 text-purple-600" />
-              Recent Visits & SOAP Notes
+              Recent Visits & Clinical Notes
             </CardTitle>
             <CardDescription>Documentation status for recent patient encounters</CardDescription>
           </div>
@@ -148,7 +148,7 @@ export default function RecentVisitsCard({ providerId }: { providerId: string })
                   {pendingCount} visit{pendingCount > 1 ? 's' : ''} need documentation
                 </p>
                 <p className="text-xs text-orange-700 mt-1">
-                  Complete SOAP notes to ensure accurate patient records
+                  Complete clinical notes to ensure accurate patient records
                 </p>
               </div>
             )}

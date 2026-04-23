@@ -30,7 +30,7 @@ export default function VisitDocumentation({ visitId }: VisitDocumentationProps)
         <CardHeader>
           <CardTitle>Visit Documentation</CardTitle>
           <CardDescription>
-            Record audio, generate transcriptions, and create SOAP notes with AI assistance
+            Record audio, generate transcriptions, and create clinical notes with AI assistance
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -42,7 +42,7 @@ export default function VisitDocumentation({ visitId }: VisitDocumentationProps)
               </TabsTrigger>
               <TabsTrigger value="soap">
                 <FileText className="h-4 w-4 mr-2" />
-                SOAP Notes
+                Clinical Notes
               </TabsTrigger>
             </TabsList>
 
@@ -98,9 +98,9 @@ export default function VisitDocumentation({ visitId }: VisitDocumentationProps)
               3
             </div>
             <div>
-              <p className="font-medium">Generate SOAP Notes</p>
+              <p className="font-medium">Generate Clinical Notes</p>
               <p className="text-sm text-blue-700">
-                Navigate to the SOAP Notes tab and click "Generate from Transcription" to automatically create structured clinical notes.
+                Navigate to the Clinical Notes tab and click "Generate from Transcription" to automatically create structured clinical notes.
               </p>
             </div>
           </div>
@@ -112,7 +112,7 @@ export default function VisitDocumentation({ visitId }: VisitDocumentationProps)
             <div>
               <p className="font-medium">Edit and Refine</p>
               <p className="text-sm text-blue-700">
-                Review and edit each SOAP section. Use the AI refinement feature to improve clarity, add detail, or adjust the tone.
+                Review and edit each clinical note section. Use the AI refinement feature to improve clarity, add detail, or adjust the tone.
               </p>
             </div>
           </div>
@@ -124,7 +124,7 @@ export default function VisitDocumentation({ visitId }: VisitDocumentationProps)
             <div>
               <p className="font-medium">Save Documentation</p>
               <p className="text-sm text-blue-700">
-                Click "Save Notes" to persist the SOAP notes to the patient's visit record. These notes become part of the permanent medical record.
+                Click "Save Notes" to persist the clinical notes to the patient's visit record. These notes become part of the permanent medical record.
               </p>
             </div>
           </div>

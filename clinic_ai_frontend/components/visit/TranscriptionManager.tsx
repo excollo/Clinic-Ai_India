@@ -199,7 +199,7 @@ export default function TranscriptionManager({
                       ) : (
                         <>
                           <Sparkles className="w-4 h-4 mr-2" />
-                          Generate SOAP Notes
+                          Generate Clinical Notes
                         </>
                       )}
                     </Button>

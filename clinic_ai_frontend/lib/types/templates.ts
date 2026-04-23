@@ -44,6 +44,14 @@ export interface SOAPTemplate {
     objective: string;
     assessment: string;
     plan: string;
+    doctor_notes?: string;
+    chief_complaint?: string;
+    follow_up_in?: string;
+    follow_up_date?: string;
+    red_flags?: string[];
+    data_gaps?: string[];
+    rx?: Array<Record<string, any>>;
+    investigations?: Array<Record<string, any>>;
   };
   metadata: TemplateMetadata;
 }

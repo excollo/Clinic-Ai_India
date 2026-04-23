@@ -205,7 +205,7 @@ export default function SaveTemplateModal({
 
               <div className="space-y-4">
                 <p className="text-sm text-slate-700">
-                  We've automatically scrubbed patient-identifiable information from your SOAP notes.
+                  We've automatically scrubbed patient-identifiable information from your clinical notes.
                   Please review each section to ensure no PHI remains before saving as a template.
                 </p>
 

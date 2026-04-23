@@ -6,6 +6,8 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { ArrowLeft, CheckCircle, Clock, AlertTriangle, FileText, Calendar } from 'lucide-react';
 import Link from 'next/link';
+import apiClient from '@/lib/api/client';
+import toast from 'react-hot-toast';
 
 interface QuestionnaireResponse {
   id: string;
@@ -19,47 +21,56 @@ interface QuestionnaireResponse {
   }[];
 }
 
-// Mock data for demonstration
-const mockResponses: QuestionnaireResponse[] = [
-  {
-    id: 'resp-1',
-    templateName: 'General Pre-Visit',
-    submittedAt: '2025-11-22T10:30:00Z',
-    status: 'completed',
-    responses: [
-      { question: 'What is the main reason for your visit today?', answer: 'Annual checkup and medication review' },
-      { question: 'Are you currently experiencing any symptoms?', answer: 'Mild headaches occasionally', flagged: true },
-      { question: 'Have you had any changes in your medications?', answer: 'No changes' },
-      { question: 'Do you have any allergies we should be aware of?', answer: 'Penicillin allergy' },
-      { question: 'How would you rate your overall health?', answer: 'Good' },
-      { question: 'Have you been hospitalized in the past year?', answer: 'No' },
-    ]
-  },
-  {
-    id: 'resp-2',
-    templateName: 'Symptom Assessment',
-    submittedAt: '2025-11-20T14:15:00Z',
-    status: 'completed',
-    responses: [
-      { question: 'Primary symptom', answer: 'Persistent cough' },
-      { question: 'Duration of symptoms', answer: '2 weeks', flagged: true },
-      { question: 'Severity (1-10)', answer: '6' },
-      { question: 'Any associated symptoms?', answer: 'Slight fever, fatigue' },
-    ]
-  }
-];
-
 export default function CarePrepResponsesPage({ params }: { params: { patientId: string } }) {
   const [responses, setResponses] = useState<QuestionnaireResponse[]>([]);
   const [selectedResponse, setSelectedResponse] = useState<QuestionnaireResponse | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [resolvedVisitId, setResolvedVisitId] = useState<string | null>(null);
 
   useEffect(() => {
-    // Simulate loading responses
-    setTimeout(() => {
-      setResponses(mockResponses);
-      setIsLoading(false);
-    }, 500);
+    const loadIntakeSession = async () => {
+      setIsLoading(true);
+      try {
+        const latest = await apiClient.getLatestVisitForPatient(params.patientId);
+        const visitId = latest.visit_id;
+        setResolvedVisitId(visitId);
+        const intake = await apiClient.getVisitIntakeSession(visitId);
+        const mapped: QuestionnaireResponse[] = intake.question_answers.length
+          ? [
+              {
+                id: intake.visit_id,
+                templateName: 'Patient Intake Session',
+                submittedAt: intake.updated_at || intake.created_at || new Date().toISOString(),
+                status:
+                  intake.status === 'completed'
+                    ? 'completed'
+                    : intake.status === 'in_progress'
+                    ? 'partial'
+                    : 'pending',
+                responses: intake.question_answers.map((qa) => ({
+                  question: qa.question || 'Question',
+                  answer: qa.answer || '-',
+                  flagged: false,
+                })),
+              },
+            ]
+          : [];
+        setResponses(mapped);
+        if (mapped.length > 0) {
+          setSelectedResponse(mapped[0]);
+        } else {
+          setSelectedResponse(null);
+        }
+      } catch (error: any) {
+        toast.error(error?.response?.data?.detail || 'Failed to load intake session');
+        setResponses([]);
+        setSelectedResponse(null);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    loadIntakeSession();
   }, [params.patientId]);
 
   const formatDate = (dateString: string) => {
@@ -103,7 +114,10 @@ export default function CarePrepResponsesPage({ params }: { params: { patientId:
         </Link>
         <div>
           <h1 className="text-2xl font-bold">CarePrep Responses</h1>
-          <p className="text-gray-600">Patient ID: {params.patientId}</p>
+          <p className="text-gray-600">
+            Patient ID: {params.patientId}
+            {resolvedVisitId ? ` • Visit: ${resolvedVisitId}` : ''}
+          </p>
         </div>
       </div>
 

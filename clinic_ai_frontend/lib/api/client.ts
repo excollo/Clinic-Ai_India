@@ -420,6 +420,24 @@ class APIClient {
       visit_id: string;
       whatsapp_triggered: boolean;
       existing_patient: boolean;
+      pending_schedule_for_intake?: boolean;
+    };
+  }
+
+  async scheduleVisitIntake(
+    visitId: string,
+    payload: { appointment_date: string; appointment_time: string },
+  ) {
+    const response = await this.client.post(
+      `/api/visits/${encodeURIComponent(visitId)}/schedule-intake`,
+      payload,
+    );
+    return response.data as {
+      visit_id: string;
+      patient_id: string;
+      scheduled_start: string;
+      whatsapp_triggered: boolean;
+      intake_skipped_existing_session?: boolean;
     };
   }
 
@@ -437,6 +455,7 @@ class APIClient {
       status: string;
       scheduled_start?: string;
       intake_triggered?: boolean;
+      pending_schedule_for_intake?: boolean;
     };
   }
 
@@ -475,7 +494,7 @@ class APIClient {
   // ==================== Vitals ====================
 
   async generateVitalsForm(patientId: string, visitId: string) {
-    const response = await this.client.post(`/vitals/generate-form/${encodeURIComponent(patientId)}/${encodeURIComponent(visitId)}`);
+    const response = await this.client.post(`/api/vitals/generate-form/${encodeURIComponent(patientId)}/${encodeURIComponent(visitId)}`);
     return response.data as {
       form_id: string;
       patient_id: string;
@@ -495,7 +514,7 @@ class APIClient {
   }
 
   async getVitalsSubmitTemplate(patientId: string, visitId: string) {
-    const response = await this.client.get(`/vitals/submit-template/${encodeURIComponent(patientId)}/${encodeURIComponent(visitId)}`);
+    const response = await this.client.get(`/api/vitals/submit-template/${encodeURIComponent(patientId)}/${encodeURIComponent(visitId)}`);
     return response.data as {
       patient_id: string;
       visit_id: string;
@@ -513,7 +532,7 @@ class APIClient {
     staff_name: string;
     values: Array<{ key: string; value: string | number | boolean | null }>;
   }) {
-    const response = await this.client.post('/vitals/submit', data);
+    const response = await this.client.post('/api/vitals/submit', data);
     return response.data as {
       vitals_id: string;
       patient_id: string;
@@ -523,7 +542,7 @@ class APIClient {
   }
 
   async getLatestVitals(patientId: string, visitId: string) {
-    const response = await this.client.get(`/vitals/latest/${encodeURIComponent(patientId)}/${encodeURIComponent(visitId)}`);
+    const response = await this.client.get(`/api/vitals/latest/${encodeURIComponent(patientId)}/${encodeURIComponent(visitId)}`);
     return response.data as {
       vitals_id: string;
       patient_id: string;
@@ -560,6 +579,25 @@ class APIClient {
     return await this.client.get(`/api/visits/${visitId}`);
   }
 
+  async getVisitIntakeSession(visitId: string) {
+    const response = await this.client.get(`/api/visits/${encodeURIComponent(visitId)}/intake-session`);
+    return response.data as {
+      visit_id: string;
+      patient_id?: string;
+      status: string;
+      illness?: string | null;
+      updated_at?: string | null;
+      created_at?: string | null;
+      question_answers: Array<{
+        question: string;
+        answer: string;
+        topic?: string | null;
+        asked_at?: string | null;
+        answered_at?: string | null;
+      }>;
+    };
+  }
+
   async getPatientVisits(patientId: string, status?: string) {
     const params = status ? { status_filter: status } : {};
     return await this.client.get(`/api/visits/patient/${patientId}`, { params });
@@ -571,7 +609,7 @@ class APIClient {
   }
 
   async getProviderUpcomingVisits(providerId: string) {
-    const response = await this.client.get(`/api/visits/provider/${providerId}/upcoming`);
+    const response = await this.client.get(`/api/visits/provider/${encodeURIComponent(providerId)}/upcoming`);
     return response.data as {
       appointments: Array<{
         appointment_id: string;
@@ -582,6 +620,7 @@ class APIClient {
         appointment_type?: string;
         previsit_completed?: boolean;
         visit_id?: string;
+        status?: string;
       }>;
     };
   }

@@ -159,7 +159,7 @@
             "headline2": "Concentrez-vous sur les soins.",
             "subheadline": "Documentation propulsée par l'IA qui fonctionne comme vous. Passez moins de temps à documenter, plus de temps avec les patients. Centré sur le patient, dirigé par le médecin.",
             "title": "Documentation clinique propulsée par l'IA",
-            "subtitle": "Réduisez le temps de documentation de 70 % grâce à la transcription médicale intelligente et à la génération de notes SOAP",
+            "subtitle": "Réduisez le temps de documentation de 70 % grâce à la transcription médicale intelligente et à la génération de notes cliniques",
             "cta": "Commencer l'essai gratuit",
             "secondaryCta": "Voir la démo"
         },
@@ -170,7 +170,7 @@
                 "description": "Transcription audio en temps réel avec précision de la terminologie médicale"
             },
             "soapNotes": {
-                "title": "Notes SOAP intelligentes",
+                "title": "Notes cliniques intelligentes",
                 "description": "Notes cliniques générées par l'IA à partir des conversations avec les patients"
             },
             "carePrep": {
@@ -391,7 +391,7 @@
         "visit": {
             "startDocumentation": "Commencer la documentation",
             "viewHistory": "Voir l'historique",
-            "generateNote": "Générer une note SOAP",
+            "generateNote": "Générer une note clinique",
             "transcriptionActive": "Enregistrement en cours...",
             "completeVisit": "Terminer la visite"
         }
