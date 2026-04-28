@@ -1,6 +1,7 @@
 from src.adapters.external.ai.openai_client import OpenAIQuestionClient
 from src.adapters.external.ai.openai_client import IntakeTurnError
 from src.application.services.intake_chat_service import IntakeChatService
+from src.core.config import get_settings
 
 
 def _build_service() -> IntakeChatService:
@@ -124,16 +125,28 @@ class _FakeCollection:
     def find_one(self, *_args, **_kwargs):  # noqa: ANN001
         return self.record or {}
 
-    def update_one(self, query, payload):  # noqa: ANN001
-        self.last_update = (query, payload)
+    def update_one(self, query, payload, **kwargs):  # noqa: ANN001
+        self.last_update = (query, payload, kwargs)
 
 
 class _FakeWhatsApp:
-    def __init__(self) -> None:
+    def __init__(self, *, fail_template: bool = False) -> None:
         self.sent = []
+        self.fail_template = fail_template
 
     def send_text(self, to_number: str, message: str) -> None:
-        self.sent.append((to_number, message))
+        self.sent.append(("text", to_number, message))
+
+    def send_template(
+        self,
+        to_number: str,
+        template_name: str,
+        language_code: str,
+        body_values: list[str] | None = None,
+    ) -> None:
+        if self.fail_template:
+            raise RuntimeError("template failed")
+        self.sent.append(("template", to_number, template_name, language_code, body_values or []))
 
 
 def test_generate_next_turn_exception_uses_global_fallback_metadata() -> None:
@@ -177,3 +190,63 @@ def test_generate_next_turn_exception_uses_global_fallback_metadata() -> None:
     assert update_payload["last_fallback_reason"] == "json_parse_error"
     assert update_payload["last_selected_topic"] == "associated_symptoms"
     assert service.whatsapp.sent
+
+
+def test_start_intake_prefers_template_when_configured() -> None:
+    service = IntakeChatService.__new__(IntakeChatService)
+    fake_db = type("FakeDB", (), {})()
+    fake_db.intake_sessions = _FakeCollection()
+    service.db = fake_db
+    service.whatsapp = _FakeWhatsApp()
+    service.openai = OpenAIQuestionClient()
+
+    settings = get_settings()
+    previous_template = settings.whatsapp_intake_template_name
+    previous_param_count = settings.whatsapp_intake_template_param_count
+    settings.whatsapp_intake_template_name = "opening_msg"
+    settings.whatsapp_intake_template_param_count = 1
+    try:
+        service.start_intake(
+            patient_id="patient-1",
+            visit_id="visit-1",
+            to_number="+91 98765 43210",
+            language="en",
+        )
+    finally:
+        settings.whatsapp_intake_template_name = previous_template
+        settings.whatsapp_intake_template_param_count = previous_param_count
+
+    assert service.whatsapp.sent
+    first = service.whatsapp.sent[0]
+    assert first[0] == "template"
+    assert first[1] == "919876543210"
+    assert first[2] == "opening_msg"
+
+
+def test_start_intake_falls_back_to_text_when_template_fails() -> None:
+    service = IntakeChatService.__new__(IntakeChatService)
+    fake_db = type("FakeDB", (), {})()
+    fake_db.intake_sessions = _FakeCollection()
+    service.db = fake_db
+    service.whatsapp = _FakeWhatsApp(fail_template=True)
+    service.openai = OpenAIQuestionClient()
+
+    settings = get_settings()
+    previous_template = settings.whatsapp_intake_template_name
+    previous_param_count = settings.whatsapp_intake_template_param_count
+    settings.whatsapp_intake_template_name = "opening_msg"
+    settings.whatsapp_intake_template_param_count = 1
+    try:
+        service.start_intake(
+            patient_id="patient-1",
+            visit_id="visit-1",
+            to_number="9876543210",
+            language="en",
+        )
+    finally:
+        settings.whatsapp_intake_template_name = previous_template
+        settings.whatsapp_intake_template_param_count = previous_param_count
+
+    assert service.whatsapp.sent
+    assert service.whatsapp.sent[0][0] == "text"
+    assert service.whatsapp.sent[0][1] == "9876543210"

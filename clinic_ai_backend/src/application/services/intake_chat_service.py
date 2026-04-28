@@ -64,15 +64,40 @@ class IntakeChatService:
                 else settings.whatsapp_intake_template_lang_en
             )
             body_values = [opening_message] if settings.whatsapp_intake_template_param_count > 0 else []
-            # Send first business-initiated template to open the WhatsApp conversation window.
-            self.whatsapp.send_template(
-                to_number=normalized_to_number,
-                template_name=settings.whatsapp_intake_template_name,
-                language_code=language_code,
-                body_values=body_values,
-            )
+            try:
+                # Send first business-initiated template to open the WhatsApp conversation window.
+                self.whatsapp.send_template(
+                    to_number=normalized_to_number,
+                    template_name=settings.whatsapp_intake_template_name,
+                    language_code=language_code,
+                    body_values=body_values,
+                )
+                logger.info(
+                    "whatsapp_intake_opening_sent visit_id=%s channel=template template=%s to=%s",
+                    visit_id,
+                    settings.whatsapp_intake_template_name,
+                    self._mask_phone_number(normalized_to_number),
+                )
+            except Exception:
+                logger.exception(
+                    "whatsapp_intake_template_failed visit_id=%s template=%s to=%s fallback=text",
+                    visit_id,
+                    settings.whatsapp_intake_template_name,
+                    self._mask_phone_number(normalized_to_number),
+                )
+                self.whatsapp.send_text(normalized_to_number, opening_message)
+                logger.info(
+                    "whatsapp_intake_opening_sent visit_id=%s channel=text to=%s reason=template_failure",
+                    visit_id,
+                    self._mask_phone_number(normalized_to_number),
+                )
         else:
             self.whatsapp.send_text(normalized_to_number, opening_message)
+            logger.info(
+                "whatsapp_intake_opening_sent visit_id=%s channel=text to=%s reason=template_not_configured",
+                visit_id,
+                self._mask_phone_number(normalized_to_number),
+            )
 
     def handle_patient_reply(self, from_number: str, message_text: str, message_id: str | None = None) -> None:
         """Handle incoming WhatsApp reply and continue intake."""
@@ -846,6 +871,13 @@ class IntakeChatService:
     def _normalize_phone_number(phone_number: str) -> str:
         """Normalize phone number for reliable matching across webhook/provider formats."""
         return "".join(ch for ch in str(phone_number or "") if ch.isdigit())
+
+    @staticmethod
+    def _mask_phone_number(phone_number: str) -> str:
+        value = str(phone_number or "")
+        if len(value) <= 4:
+            return "*" * len(value)
+        return f"{'*' * (len(value) - 4)}{value[-4:]}"
 
     @staticmethod
     def _chief_complaint_question(language: str) -> str:
