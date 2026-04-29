@@ -127,6 +127,35 @@ class _FakeCollection:
 
     def update_one(self, query, payload, **kwargs):  # noqa: ANN001
         self.last_update = (query, payload, kwargs)
+        modified_count = 0
+        if self.record:
+            if query.get("_id") is not None and self.record.get("_id") != query.get("_id"):
+                return type("UpdateResult", (), {"modified_count": 0})()
+            processed_constraint = query.get("processed_message_ids") or {}
+            blocked_message_id = processed_constraint.get("$ne")
+            processed_ids = list(self.record.get("processed_message_ids") or [])
+            if blocked_message_id is not None and blocked_message_id in processed_ids:
+                return type("UpdateResult", (), {"modified_count": 0})()
+            for key, value in (payload.get("$set") or {}).items():
+                self.record[key] = value
+            for key, value in (payload.get("$push") or {}).items():
+                current = list(self.record.get(key) or [])
+                current.append(value)
+                self.record[key] = current
+            modified_count = 1
+        return type("UpdateResult", (), {"modified_count": modified_count})()
+
+    def find_one_and_update(self, query, payload, **kwargs):  # noqa: ANN001
+        if not self.record:
+            return None
+        if query.get("_id") is not None and self.record.get("_id") != query.get("_id"):
+            return None
+        if query.get("status") is not None and self.record.get("status") != query.get("status"):
+            return None
+        previous = dict(self.record)
+        for key, value in (payload.get("$set") or {}).items():
+            self.record[key] = value
+        return previous
 
 
 class _FakeWhatsApp:
@@ -250,3 +279,67 @@ def test_start_intake_falls_back_to_text_when_template_fails() -> None:
     assert service.whatsapp.sent
     assert service.whatsapp.sent[0][0] == "text"
     assert service.whatsapp.sent[0][1] == "9876543210"
+
+
+def test_first_substantive_reply_after_template_is_used_as_illness() -> None:
+    service = IntakeChatService.__new__(IntakeChatService)
+    fake_db = type("FakeDB", (), {})()
+    fake_db.intake_sessions = _FakeCollection()
+    fake_db.intake_sessions.record = {
+        "_id": "session-1",
+        "visit_id": "visit-1",
+        "to_number": "919876543210",
+        "patient_name": "Riya Sharma",
+        "language": "en",
+        "status": "awaiting_conversation_start",
+        "answers": [],
+    }
+    service.db = fake_db
+    service.whatsapp = _FakeWhatsApp()
+    service.openai = OpenAIQuestionClient()
+
+    captured: dict[str, object] = {}
+
+    def _capture(session: dict, illness_text: str) -> None:
+        captured["session_status"] = session.get("status")
+        captured["illness_text"] = illness_text
+
+    service._save_illness_and_generate_questions = _capture  # type: ignore[method-assign]
+
+    service.handle_patient_reply(
+        from_number="+91 98765 43210",
+        message_text="Fever and cough since yesterday",
+        message_id="wamid-1",
+    )
+
+    assert captured["session_status"] == "awaiting_illness"
+    assert captured["illness_text"] == "Fever and cough since yesterday"
+    assert service.whatsapp.sent == []
+
+
+def test_first_generic_reply_after_template_reasks_chief_complaint() -> None:
+    service = IntakeChatService.__new__(IntakeChatService)
+    fake_db = type("FakeDB", (), {})()
+    fake_db.intake_sessions = _FakeCollection()
+    fake_db.intake_sessions.record = {
+        "_id": "session-2",
+        "visit_id": "visit-2",
+        "to_number": "919876543210",
+        "patient_name": "Riya Sharma",
+        "language": "en",
+        "status": "awaiting_conversation_start",
+        "answers": [],
+    }
+    service.db = fake_db
+    service.whatsapp = _FakeWhatsApp()
+    service.openai = OpenAIQuestionClient()
+
+    service.handle_patient_reply(
+        from_number="+91 98765 43210",
+        message_text="Hi",
+        message_id="wamid-2",
+    )
+
+    assert service.whatsapp.sent
+    assert service.whatsapp.sent[0][0] == "text"
+    assert "main health problem" in service.whatsapp.sent[0][2].lower()

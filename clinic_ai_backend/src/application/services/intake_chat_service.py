@@ -29,6 +29,11 @@ class IntakeChatService:
         """Start intake with opening message; first clinical question comes after user reply."""
         normalized_to_number = self._normalize_phone_number(to_number)
         opening_message = self._opening_message(language)
+        patient_name = ""
+        patients_collection = getattr(self.db, "patients", None)
+        if patients_collection is not None:
+            patient = patients_collection.find_one({"patient_id": patient_id}) or {}
+            patient_name = str(patient.get("name") or "").strip()
 
         self.db.intake_sessions.update_one(
             {"visit_id": visit_id},
@@ -38,6 +43,7 @@ class IntakeChatService:
                     "visit_id": visit_id,
                     "to_number": normalized_to_number,
                     "language": language,
+                    "patient_name": patient_name,
                     "status": "awaiting_conversation_start",
                     "greeting_sent": True,
                     "illness": None,
@@ -146,7 +152,7 @@ class IntakeChatService:
 
         status = session.get("status")
         if status == "awaiting_conversation_start":
-            self.db.intake_sessions.update_one(
+            claimed = self.db.intake_sessions.find_one_and_update(
                 {"_id": session["_id"], "status": "awaiting_conversation_start"},
                 {
                     "$set": {
@@ -155,10 +161,20 @@ class IntakeChatService:
                     }
                 },
             )
-            self.whatsapp.send_text(
-                session["to_number"],
-                self._chief_complaint_question(session.get("language", "en")),
-            )
+            if not claimed:
+                return
+            refreshed = self.db.intake_sessions.find_one({"_id": session["_id"]}) or {
+                **session,
+                "status": "awaiting_illness",
+            }
+            patient_context = {"name": refreshed.get("patient_name", "")}
+            if self._should_reask_chief_complaint(cleaned, patient_context):
+                self.whatsapp.send_text(
+                    session["to_number"],
+                    self._chief_complaint_question(session.get("language", "en")),
+                )
+                return
+            self._save_illness_and_generate_questions(refreshed, cleaned)
             return
 
         if status == "awaiting_illness":
