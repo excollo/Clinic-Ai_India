@@ -1,14 +1,18 @@
 """Follow-through and lab pipeline routes."""
 from __future__ import annotations
 
+import base64
+import json
 import re
 from datetime import datetime, timezone
+from urllib import request
 from uuid import uuid4
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
 from pydantic import BaseModel, Field
 
 from src.adapters.db.mongo.client import get_database
+from src.core.config import get_settings
 from src.application.utils.patient_id_crypto import encode_patient_id
 
 router = APIRouter(prefix="/api/follow-through", tags=["Follow-through"])
@@ -60,6 +64,8 @@ def _public_lab_record(doc: dict) -> dict:
         "source": str(doc.get("source") or "whatsapp"),
         "status": str(doc.get("status") or "received"),
         "raw_text": str(doc.get("raw_text") or ""),
+        "ocr_text": str(doc.get("ocr_text") or ""),
+        "image_count": int(doc.get("image_count") or 0),
         "extracted_values": doc.get("extracted_values") or [],
         "flags": doc.get("flags") or [],
         "doctor_decision": doc.get("doctor_decision"),
@@ -94,6 +100,51 @@ def _find_visit_for_follow_through(raw_visit_id: str) -> dict | None:
     return None
 
 
+def _ocr_images_with_openai(image_payloads: list[tuple[bytes, str]]) -> str:
+    """Best-effort OCR using OpenAI vision; returns merged plain text."""
+    settings = get_settings()
+    if not settings.openai_api_key or not image_payloads:
+        return ""
+
+    extracted_parts: list[str] = []
+    for image_bytes, mime_type in image_payloads:
+        b64 = base64.b64encode(image_bytes).decode("ascii")
+        payload = {
+            "model": settings.openai_model,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": (
+                                "Read this lab report image and return only extracted text lines "
+                                "with numbers/units exactly as visible. No explanation."
+                            ),
+                        },
+                        {"type": "image_url", "image_url": {"url": f"data:{mime_type};base64,{b64}"}},
+                    ],
+                }
+            ],
+            "temperature": 0,
+        }
+        req = request.Request(
+            url="https://api.openai.com/v1/chat/completions",
+            data=json.dumps(payload).encode("utf-8"),
+            headers={
+                "Authorization": f"Bearer {settings.openai_api_key}",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        with request.urlopen(req, timeout=45) as resp:
+            body = json.loads(resp.read().decode("utf-8"))
+            text = str(body["choices"][0]["message"]["content"] or "").strip()
+            if text:
+                extracted_parts.append(text)
+    return "\n\n".join(extracted_parts).strip()
+
+
 @router.post("/lab-records")
 def create_lab_record(payload: CreateLabRecordRequest) -> dict:
     db = get_database()
@@ -109,6 +160,60 @@ def create_lab_record(payload: CreateLabRecordRequest) -> dict:
         "source": payload.source,
         "status": "received",
         "raw_text": payload.raw_text,
+        "extracted_values": [],
+        "flags": [],
+        "doctor_decision": None,
+        "doctor_notes": None,
+        "continuity_summary": None,
+        "created_at": now,
+        "updated_at": now,
+    }
+    db.follow_through_lab_records.insert_one(record)
+    return _public_lab_record(record)
+
+
+@router.post("/lab-records/with-images")
+async def create_lab_record_with_images(
+    visit_id: str = Form(...),
+    source: str = Form(default="whatsapp"),
+    raw_text: str = Form(default=""),
+    image_files: list[UploadFile] = File(default=[]),
+) -> dict:
+    db = get_database()
+    visit = _find_visit_for_follow_through(visit_id)
+    if not visit:
+        raise HTTPException(status_code=404, detail="Visit not found")
+
+    image_payloads: list[tuple[bytes, str]] = []
+    for image_file in image_files:
+        mime_type = str(image_file.content_type or "").strip().lower()
+        if not mime_type.startswith("image/"):
+            continue
+        payload = await image_file.read()
+        if payload:
+            image_payloads.append((payload, mime_type))
+
+    ocr_text = ""
+    if image_payloads:
+        try:
+            ocr_text = _ocr_images_with_openai(image_payloads)
+        except Exception:
+            ocr_text = ""
+
+    merged_raw_text = str(raw_text or "").strip()
+    if ocr_text:
+        merged_raw_text = f"{merged_raw_text}\n\n{ocr_text}".strip() if merged_raw_text else ocr_text
+
+    now = datetime.now(timezone.utc)
+    record = {
+        "record_id": f"LAB-{uuid4()}",
+        "visit_id": str(visit.get("visit_id") or visit.get("id") or visit_id),
+        "patient_id": str(visit.get("patient_id") or ""),
+        "source": source,
+        "status": "received",
+        "raw_text": merged_raw_text,
+        "ocr_text": ocr_text,
+        "image_count": len(image_payloads),
         "extracted_values": [],
         "flags": [],
         "doctor_decision": None,
@@ -139,7 +244,10 @@ def extract_lab_record(record_id: str) -> dict:
     if not record:
         raise HTTPException(status_code=404, detail="Lab record not found")
 
-    values, flags = _extract_numeric_flags(str(record.get("raw_text") or ""))
+    source_text = str(record.get("raw_text") or "").strip()
+    if not source_text and str(record.get("ocr_text") or "").strip():
+        source_text = str(record.get("ocr_text") or "").strip()
+    values, flags = _extract_numeric_flags(source_text)
     db.follow_through_lab_records.update_one(
         {"record_id": record_id},
         {

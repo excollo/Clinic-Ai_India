@@ -222,3 +222,28 @@ def test_follow_through_accepts_case_insensitive_visit_lookup(app_client, patche
     )
     assert created.status_code == 200
     assert created.json()["visit_id"] == "CONSULT-20260429-167"
+
+
+def test_follow_through_extract_uses_ocr_text_when_raw_text_empty(app_client, patched_db) -> None:
+    now = datetime.now(timezone.utc)
+    patched_db.follow_through_lab_records.insert_one(
+        {
+            "record_id": "LAB-OCR-1",
+            "visit_id": "CONSULT-20260429-987",
+            "patient_id": "patient-ocr",
+            "source": "whatsapp",
+            "status": "received",
+            "raw_text": "",
+            "ocr_text": "Glucose 240 SpO2 90",
+            "extracted_values": [],
+            "flags": [],
+            "created_at": now,
+            "updated_at": now,
+        }
+    )
+
+    extracted = app_client.post("/api/follow-through/lab-records/LAB-OCR-1/extract")
+    assert extracted.status_code == 200
+    payload = extracted.json()
+    assert payload["status"] == "extracted"
+    assert len(payload["extracted_values"]) >= 2
