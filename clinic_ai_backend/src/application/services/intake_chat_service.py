@@ -13,6 +13,7 @@ from src.core.config import get_settings
 
 
 STOP_WORDS = {"stop", "enough", "exit", "quit", "band", "rok do", "bas"}
+NON_TEXT_MESSAGE_TRIGGER = "__non_text_message__"
 MIN_FOLLOW_UP_QUESTIONS = 3
 logger = logging.getLogger(__name__)
 
@@ -130,8 +131,13 @@ class IntakeChatService:
         if message_id and not self._claim_message(session["_id"], message_id):
             return
 
+        status = session.get("status")
         cleaned = (message_text or "").strip()
         if not cleaned:
+            if status != "awaiting_conversation_start":
+                return
+            cleaned = NON_TEXT_MESSAGE_TRIGGER
+        if cleaned == NON_TEXT_MESSAGE_TRIGGER and status != "awaiting_conversation_start":
             return
         if self._is_probable_duplicate_reply(session, cleaned):
             return
@@ -150,7 +156,6 @@ class IntakeChatService:
             self._auto_generate_pre_visit_summary(session)
             return
 
-        status = session.get("status")
         if status == "awaiting_conversation_start":
             claimed = self.db.intake_sessions.find_one_and_update(
                 {"_id": session["_id"], "status": "awaiting_conversation_start"},
@@ -163,18 +168,12 @@ class IntakeChatService:
             )
             if not claimed:
                 return
-            refreshed = self.db.intake_sessions.find_one({"_id": session["_id"]}) or {
-                **session,
-                "status": "awaiting_illness",
-            }
-            patient_context = {"name": refreshed.get("patient_name", "")}
-            if self._should_reask_chief_complaint(cleaned, patient_context):
-                self.whatsapp.send_text(
-                    session["to_number"],
-                    self._chief_complaint_question(session.get("language", "en")),
-                )
-                return
-            self._save_illness_and_generate_questions(refreshed, cleaned)
+            # Product behavior: first inbound message (any content) should only start intake
+            # and ask the chief complaint question. The next user message becomes illness.
+            self.whatsapp.send_text(
+                session["to_number"],
+                self._chief_complaint_question(session.get("language", "en")),
+            )
             return
 
         if status == "awaiting_illness":

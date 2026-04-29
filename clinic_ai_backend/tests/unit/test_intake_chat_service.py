@@ -298,23 +298,15 @@ def test_first_substantive_reply_after_template_is_used_as_illness() -> None:
     service.whatsapp = _FakeWhatsApp()
     service.openai = OpenAIQuestionClient()
 
-    captured: dict[str, object] = {}
-
-    def _capture(session: dict, illness_text: str) -> None:
-        captured["session_status"] = session.get("status")
-        captured["illness_text"] = illness_text
-
-    service._save_illness_and_generate_questions = _capture  # type: ignore[method-assign]
-
     service.handle_patient_reply(
         from_number="+91 98765 43210",
         message_text="Fever and cough since yesterday",
         message_id="wamid-1",
     )
 
-    assert captured["session_status"] == "awaiting_illness"
-    assert captured["illness_text"] == "Fever and cough since yesterday"
-    assert service.whatsapp.sent == []
+    assert service.whatsapp.sent
+    assert service.whatsapp.sent[0][0] == "text"
+    assert "main health problem" in service.whatsapp.sent[0][2].lower()
 
 
 def test_first_generic_reply_after_template_reasks_chief_complaint() -> None:
@@ -338,6 +330,34 @@ def test_first_generic_reply_after_template_reasks_chief_complaint() -> None:
         from_number="+91 98765 43210",
         message_text="Hi",
         message_id="wamid-2",
+    )
+
+    assert service.whatsapp.sent
+    assert service.whatsapp.sent[0][0] == "text"
+    assert "main health problem" in service.whatsapp.sent[0][2].lower()
+
+
+def test_non_text_first_reply_after_template_still_starts_intake() -> None:
+    service = IntakeChatService.__new__(IntakeChatService)
+    fake_db = type("FakeDB", (), {})()
+    fake_db.intake_sessions = _FakeCollection()
+    fake_db.intake_sessions.record = {
+        "_id": "session-3",
+        "visit_id": "visit-3",
+        "to_number": "919876543210",
+        "patient_name": "Riya Sharma",
+        "language": "en",
+        "status": "awaiting_conversation_start",
+        "answers": [],
+    }
+    service.db = fake_db
+    service.whatsapp = _FakeWhatsApp()
+    service.openai = OpenAIQuestionClient()
+
+    service.handle_patient_reply(
+        from_number="+91 98765 43210",
+        message_text="__non_text_message__",
+        message_id="wamid-3",
     )
 
     assert service.whatsapp.sent

@@ -4,6 +4,7 @@ import logging
 from fastapi import APIRouter, HTTPException, Query, Request, Response
 
 from src.application.services.intake_chat_service import IntakeChatService
+from src.application.services.intake_chat_service import NON_TEXT_MESSAGE_TRIGGER
 from src.core.config import get_settings
 
 router = APIRouter(prefix="/webhooks/whatsapp", tags=["Workflow"])
@@ -45,10 +46,11 @@ async def receive_webhook(request: Request) -> dict:
                     message.get("type"),
                     bool(text),
                 )
-                if from_number and text:
+                # Intake should start even if user replies with non-text (emoji-only, sticker, reaction, media, etc.).
+                if from_number:
                     service.handle_patient_reply(
                         from_number=from_number,
-                        message_text=text,
+                        message_text=text or NON_TEXT_MESSAGE_TRIGGER,
                         message_id=message_id,
                     )
 
