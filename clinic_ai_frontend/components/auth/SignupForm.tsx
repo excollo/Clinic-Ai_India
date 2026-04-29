@@ -2,7 +2,7 @@
 
 import React from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { useForm, Controller } from 'react-hook-form';
+import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { signupSchema, SignupFormValues } from '@/lib/validators/auth';
 import { practiceTypes } from '@/lib/mock/documents';
@@ -12,8 +12,6 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 // Removed Radix UI Select - using native HTML select for practice type dropdown
-import { Checkbox } from '@/components/ui/checkbox';
-import Link from 'next/link';
 import { Check } from 'lucide-react';
 import { useAuthStore } from '@/lib/stores/authStore';
 import { apiClient } from '@/lib/api/client';
@@ -26,13 +24,12 @@ export const SignupForm = () => {
   const {
     register,
     handleSubmit,
-    control,
     watch,
     formState: { errors, isSubmitting },
   } = useForm<SignupFormValues>({
     resolver: zodResolver(signupSchema),
     defaultValues: {
-      agreement: false,
+      agreement: true,
     },
   });
 
@@ -257,41 +254,7 @@ export const SignupForm = () => {
             )}
           </div>
 
-          {/* Agreement Checkbox */}
-          <div className="flex items-start space-x-3">
-            <Controller
-              name="agreement"
-              control={control}
-              render={({ field }) => (
-                <Checkbox
-                  id="agreement"
-                  checked={field.value}
-                  onCheckedChange={field.onChange}
-                  className="mt-1"
-                />
-              )}
-            />
-            <div className="flex-1">
-              <label htmlFor="agreement" className="text-sm text-gray-700 leading-tight cursor-pointer">
-                On behalf of myself and the practice, I agree to the{' '}
-                <Link href="/baa" className="text-forest-600 hover:underline">
-                  Business Associate Agreement
-                </Link>
-                , the{' '}
-                <Link href="/terms" className="text-forest-600 hover:underline">
-                  Terms of Service
-                </Link>
-                , and the{' '}
-                <Link href="/privacy" className="text-forest-600 hover:underline">
-                  Privacy Policy
-                </Link>{' '}
-                for my account.
-              </label>
-              {errors.agreement && (
-                <p className="text-sm text-red-600 mt-1">{errors.agreement.message}</p>
-              )}
-            </div>
-          </div>
+          {/* Agreement checkbox removed: consent is auto-true in backend */}
 
           {/* Submit Button */}
           <Button

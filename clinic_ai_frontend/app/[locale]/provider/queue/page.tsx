@@ -22,6 +22,8 @@ type VisitRow = {
   status: string;
   scheduled_start: string | null;
   chief_complaint: string | null;
+  // Used for provider mapping compatibility
+  appointment_id?: string;
 };
 
 type ActionState = {
@@ -43,8 +45,22 @@ export default function QueueBoardPage() {
     if (!user?.id) return;
     setLoading(true);
     try {
-      const response = await apiClient.getProviderVisits(user.id);
-      setVisits(response.data || []);
+      // Render backend exposes only the "/upcoming" provider route consistently.
+      const response = await apiClient.getProviderUpcomingVisits(user.id);
+      const appts = response.appointments || [];
+      setVisits(
+        appts.map((appt) => ({
+          id: appt.appointment_id || appt.visit_id || '',
+          visit_id: appt.visit_id || appt.appointment_id || '',
+          patient_id: appt.patient_id,
+          patient_name: appt.patient_name || 'Unknown patient',
+          visit_type: appt.appointment_type || 'Visit',
+          status: appt.status || 'open',
+          scheduled_start: appt.scheduled_start || null,
+          chief_complaint: appt.chief_complaint || null,
+          appointment_id: appt.appointment_id,
+        })),
+      );
     } catch (error) {
       toast.error('Failed to load queue board');
     } finally {
@@ -86,7 +102,7 @@ export default function QueueBoardPage() {
 
   const runAction = async (
     visitId: string,
-    action: NonNullable<ActionState['action']>,
+    action: 'queue' | 'start' | 'complete' | 'cancel' | 'no_show',
     runner: () => Promise<{ status: string; actual_start?: string | null; actual_end?: string | null }>,
     successMessage: string,
   ) => {

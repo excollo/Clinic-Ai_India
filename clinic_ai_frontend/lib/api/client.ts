@@ -411,7 +411,7 @@ class APIClient {
     phone_number: string;
     age: number;
     gender: string;
-    preferred_language: 'en' | 'hi' | 'en_US';
+    preferred_language: 'en' | 'hi' | 'en_US' | 'hi-eng' | 'kn' | 'te' | 'ta' | 'mr';
     travelled_recently: boolean;
     consent: boolean;
     workflow_type?: string;
@@ -594,8 +594,21 @@ class APIClient {
   }
 
   async getVisit(visitId: string) {
-    const response = await this.client.get(`/api/visits/${encodeURIComponent(visitId)}`);
-    return response.data;
+    const url = `/api/visits/${encodeURIComponent(visitId)}`;
+    const maxAttempts = 2;
+    let lastError: any = null;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        const response = await this.client.get(url, { timeout: 60000 });
+        return response.data;
+      } catch (error: any) {
+        lastError = error;
+        if (attempt === maxAttempts) break;
+      }
+    }
+
+    throw lastError;
   }
 
   async generatePreVisitSummary(patientId: string, visitId: string) {
@@ -645,20 +658,33 @@ class APIClient {
   }
 
   async getProviderUpcomingVisits(providerId: string) {
-    const response = await this.client.get(`/api/visits/provider/${encodeURIComponent(providerId)}/upcoming`);
-    return response.data as {
-      appointments: Array<{
-        appointment_id: string;
-        patient_id: string;
-        patient_name: string;
-        scheduled_start?: string;
-        chief_complaint?: string;
-        appointment_type?: string;
-        previsit_completed?: boolean;
-        visit_id?: string;
-        status?: string;
-      }>;
-    };
+    const url = `/api/visits/provider/${encodeURIComponent(providerId)}/upcoming`;
+    const maxAttempts = 2;
+    let lastError: any = null;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        const response = await this.client.get(url, { timeout: 60000 });
+        return response.data as {
+          appointments: Array<{
+            appointment_id: string;
+            patient_id: string;
+            patient_name: string;
+            scheduled_start?: string;
+            chief_complaint?: string;
+            appointment_type?: string;
+            previsit_completed?: boolean;
+            visit_id?: string;
+            status?: string;
+          }>;
+        };
+      } catch (error: any) {
+        lastError = error;
+        if (attempt === maxAttempts) break;
+      }
+    }
+
+    throw lastError;
   }
 
   async cancelVisit(visitId: string) {

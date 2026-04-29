@@ -13,6 +13,18 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import FlowBreadcrumb from '@/components/workspace/FlowBreadcrumb';
 
+type PreferredLanguage = 'en_US' | 'hi' | 'hi-eng' | 'kn' | 'te' | 'ta' | 'mr';
+
+const LANGUAGE_OPTIONS: Array<{ value: PreferredLanguage; label: string }> = [
+  { value: 'en_US', label: 'English (US)' },
+  { value: 'hi', label: 'Hindi' },
+  { value: 'hi-eng', label: 'Hinglish' },
+  { value: 'kn', label: 'Kannada' },
+  { value: 'te', label: 'Telugu' },
+  { value: 'ta', label: 'Tamil' },
+  { value: 'mr', label: 'Marathi' },
+];
+
 export default function RegisteredPatientsPage() {
   const pathname = usePathname();
   const ws = workspaceBaseFromPathname(pathname);
@@ -33,10 +45,10 @@ export default function RegisteredPatientsPage() {
   const [age, setAge] = useState('');
   const [gender, setGender] = useState('');
   const [country, setCountry] = useState('IND');
-  const [preferredLanguage, setPreferredLanguage] = useState<'en' | 'hi' | 'en_US'>('en_US');
+  const [preferredLanguage, setPreferredLanguage] = useState<PreferredLanguage>('en_US');
   const [emergencyContact, setEmergencyContact] = useState('');
   const [address, setAddress] = useState('');
-  const [consent, setConsent] = useState(true);
+  const consent = true; // Consent is auto-true in backend
 
   useEffect(() => {
     if (!isAuthenticated) {
@@ -76,8 +88,11 @@ export default function RegisteredPatientsPage() {
       setResult(response);
       const base = response.existing_patient ? 'Existing patient found. New visit created.' : 'New patient and visit created.';
       toast.success(`${base} Choose whether to schedule appointment now or later.`);
-    } catch (error: any) {
-      toast.error(error?.response?.data?.detail || 'Failed to register patient');
+    } catch (error: unknown) {
+      const detail =
+        (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail ||
+        (error instanceof Error ? error.message : undefined);
+      toast.error(detail || 'Failed to register patient');
     } finally {
       setSubmitting(false);
     }
@@ -121,7 +136,7 @@ export default function RegisteredPatientsPage() {
             </div>
             <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
               <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Step 3</p>
-              <p className="text-sm font-medium text-slate-900 mt-1">Book appointment now/later</p>
+              <p className="text-sm font-medium text-slate-900 mt-1">Fix appointment now/later</p>
             </div>
           </div>
 
@@ -160,11 +175,17 @@ export default function RegisteredPatientsPage() {
                   required
                 />
                 <Input value={country} onChange={(e) => setCountry(e.target.value)} placeholder="Patient Country" />
-                <Input
+                <select
                   value={preferredLanguage}
-                  onChange={(e) => setPreferredLanguage(e.target.value as 'en' | 'hi' | 'en_US')}
-                  placeholder="Patient Language"
-                />
+                  onChange={(e) => setPreferredLanguage(e.target.value as PreferredLanguage)}
+                  className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                >
+                  {LANGUAGE_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
                 <Input value={emergencyContact} onChange={(e) => setEmergencyContact(e.target.value)} placeholder="Emergency Contact (optional)" />
               </div>
               <Input
@@ -173,14 +194,7 @@ export default function RegisteredPatientsPage() {
                 placeholder="Address (optional)"
               />
               <div className="grid grid-cols-2 gap-4">
-                <label className="flex items-center gap-2 text-sm text-slate-700">
-                  <input
-                    type="checkbox"
-                    checked={consent}
-                    onChange={(e) => setConsent(e.target.checked)}
-                  />
-                  Consent
-                </label>
+                {/* Consent checkbox removed: backend treats consent as true */}
               </div>
             </div>
 
@@ -210,12 +224,12 @@ export default function RegisteredPatientsPage() {
               <div className="mt-2 rounded-md border border-green-300 bg-white p-3">
                 <p className="font-semibold text-slate-900 mb-1">Next action</p>
                 <p className="text-slate-700">
-                  Book the appointment before opening the visit workspace (vitals, transcription, clinical note).
+                  Fix the appointment before opening the visit workspace (vitals, transcription, clinical note).
                 </p>
                 <div className="mt-3 flex flex-wrap gap-2">
-                  <Link href={`${ws}/book-appointment/${encodeURIComponent(result.visit_id)}`}>
+                  <Link href={`${ws}/fix-appointment/${encodeURIComponent(result.visit_id)}`}>
                     <Button type="button" leftIcon={<CalendarClock className="h-4 w-4" />}>
-                      Book appointment
+                      Fix appointment
                     </Button>
                   </Link>
                   <Link href={`${ws}/manage-appointments`}>

@@ -47,20 +47,10 @@
       "static/chunks/main-app.js",
       "static/chunks/app/[locale]/clinic/registered-patients/page.js"
     ],
-    "/[locale]/clinic/book-appointment/[visitId]/page": [
-      "static/chunks/webpack.js",
-      "static/chunks/main-app.js",
-      "static/chunks/app/[locale]/clinic/book-appointment/[visitId]/page.js"
-    ],
     "/[locale]/clinic/patients/page": [
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",
       "static/chunks/app/[locale]/clinic/patients/page.js"
-    ],
-    "/clinic/book-appointment/[visitId]/page": [
-      "static/chunks/webpack.js",
-      "static/chunks/main-app.js",
-      "static/chunks/app/clinic/book-appointment/[visitId]/page.js"
     ],
     "/[locale]/clinic/queue/page": [
       "static/chunks/webpack.js",

@@ -110,12 +110,23 @@ export default function FixAppointmentPage({ params }: { params: { visitId: stri
       return;
     }
     setSaving(true);
+    let shouldNavigate = false;
     try {
       const response = await apiClient.scheduleVisitIntake(visitId, {
         appointment_date: appointmentDate,
         appointment_time: appointmentTime,
       });
-      setVisit((prev) => (prev ? { ...prev, scheduled_start: response.scheduled_start } : prev));
+      // Backend sets status="scheduled" when booking succeeds.
+      // Update local state too, otherwise UI can still show the previous status (e.g. "open").
+      setVisit((prev) =>
+        prev
+          ? {
+              ...prev,
+              scheduled_start: response.scheduled_start,
+              status: 'scheduled',
+            }
+          : prev,
+      );
       if (response.intake_skipped_existing_session) {
         toast('Appointment booked. Intake already existed for this visit.', { icon: 'ℹ️' });
       } else if (response.whatsapp_triggered) {
@@ -123,10 +134,12 @@ export default function FixAppointmentPage({ params }: { params: { visitId: stri
       } else {
         toast.success('Appointment booked.');
       }
+      shouldNavigate = true;
+      router.push(`${ws}/dashboard`);
     } catch (error: any) {
       toast.error(error?.response?.data?.detail || 'Failed to book appointment');
     } finally {
-      setSaving(false);
+      if (!shouldNavigate) setSaving(false);
     }
   };
 
@@ -219,7 +232,16 @@ export default function FixAppointmentPage({ params }: { params: { visitId: stri
 
           <div className="flex flex-wrap gap-2">
             {!isLocked && (
-              <Button type="button" onClick={handleSave} disabled={saving}>
+              <Button
+                type="button"
+                onClick={(e) => {
+                  // Avoid any accidental navigation caused by parent form handlers.
+                  e.preventDefault();
+                  e.stopPropagation();
+                  handleSave();
+                }}
+                disabled={saving}
+              >
                 {saving ? 'Saving...' : 'Save Appointment'}
               </Button>
             )}

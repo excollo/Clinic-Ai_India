@@ -16,9 +16,8 @@ export const signupSchema = z.object({
   }),
   phone: z.string().min(10, { message: 'Valid phone number is required' }),
   practiceType: z.string().min(1, { message: 'Please select a practice type' }),
-  agreement: z.boolean().refine((val) => val === true, {
-    message: 'You must agree to the Business Associate Agreement',
-  }),
+  // Backend/consent is handled automatically. The UI checkbox is optional.
+  agreement: z.boolean().optional().default(true),
 });
 
 export type SignupFormValues = z.infer<typeof signupSchema>;

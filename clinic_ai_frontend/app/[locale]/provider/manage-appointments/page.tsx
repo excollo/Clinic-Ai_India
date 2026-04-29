@@ -240,7 +240,14 @@ export default function ManageAppointmentsPage() {
       });
       setVisits((prev) =>
         prev.map((visit) =>
-          visit.visit_id === visitId ? { ...visit, scheduled_start: response.scheduled_start } : visit,
+          visit.visit_id === visitId
+            ? {
+                ...visit,
+                scheduled_start: response.scheduled_start,
+                // Backend sets status="scheduled" when booking succeeds.
+                status: 'scheduled',
+              }
+            : visit,
         ),
       );
       if (response.intake_skipped_existing_session) {
