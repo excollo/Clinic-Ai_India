@@ -393,3 +393,38 @@ def test_reply_matches_session_when_country_code_differs() -> None:
     assert service.whatsapp.sent
     assert service.whatsapp.sent[0][0] == "text"
     assert "main health problem" in service.whatsapp.sent[0][2].lower()
+
+
+def test_resolve_session_via_patient_phone_when_to_number_differs() -> None:
+    service = IntakeChatService.__new__(IntakeChatService)
+    fake_db = type("FakeDB", (), {})()
+    fake_db.intake_sessions = _FakeCollection()
+    fake_db.intake_sessions.record = {
+        "_id": "session-5",
+        "visit_id": "visit-5",
+        # Diverged number shape in intake session record.
+        "to_number": "0000000000",
+        "patient_id": "patient-5",
+        "patient_name": "Riya Sharma",
+        "language": "en",
+        "status": "awaiting_conversation_start",
+        "answers": [],
+    }
+    fake_db.patients = _FakeCollection()
+    fake_db.patients.record = {
+        "patient_id": "patient-5",
+        "phone_number": "9876543210",
+    }
+    service.db = fake_db
+    service.whatsapp = _FakeWhatsApp()
+    service.openai = OpenAIQuestionClient()
+
+    service.handle_patient_reply(
+        from_number="919876543210",
+        message_text="Hi",
+        message_id="wamid-5",
+    )
+
+    assert service.whatsapp.sent
+    assert service.whatsapp.sent[0][0] == "text"
+    assert "main health problem" in service.whatsapp.sent[0][2].lower()

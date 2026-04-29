@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from datetime import datetime, timezone
 from difflib import SequenceMatcher
 
@@ -110,37 +111,13 @@ class IntakeChatService:
         """Handle incoming WhatsApp reply and continue intake."""
         normalized_from = self._normalize_phone_number(from_number)
         active_statuses = ["awaiting_conversation_start", "awaiting_illness", "in_progress"]
-        session = self.db.intake_sessions.find_one(
-            {
-                "to_number": normalized_from,
-                "status": {"$in": active_statuses},
-            },
-            sort=[("updated_at", -1)],
-        )
-        if not session and normalized_from:
-            # Backward compatibility for older records saved with + prefix.
-            session = self.db.intake_sessions.find_one(
-                {
-                    "to_number": f"+{normalized_from}",
-                    "status": {"$in": active_statuses},
-                },
-                sort=[("updated_at", -1)],
-            )
-        if not session and normalized_from:
-            # Handle country-code variants (e.g., stored 10-digit local number vs inbound E.164).
-            candidates = list(
-                self.db.intake_sessions.find(
-                    {"status": {"$in": active_statuses}},
-                    {"to_number": 1, "status": 1, "updated_at": 1, "language": 1, "patient_name": 1},
-                )
-                .sort("updated_at", -1)
-                .limit(100)
-            )
-            for candidate in candidates:
-                if self._phone_numbers_match(candidate.get("to_number", ""), normalized_from):
-                    session = candidate
-                    break
+        session = self._resolve_active_session_for_inbound_number(normalized_from, active_statuses)
         if not session:
+            logger.info(
+                "whatsapp_inbound_no_session from=%s message_id=%s",
+                self._mask_phone_number(normalized_from),
+                message_id,
+            )
             return
 
         if message_id and not self._claim_message(session["_id"], message_id):
@@ -915,6 +892,52 @@ class IntakeChatService:
         if len(stored) >= 10 and len(incoming) >= 10:
             return stored[-10:] == incoming[-10:]
         return False
+
+    @staticmethod
+    def _phone_variants(phone_number: str) -> tuple[list[str], str]:
+        normalized = IntakeChatService._normalize_phone_number(phone_number)
+        if not normalized:
+            return [], ""
+        last10 = normalized[-10:] if len(normalized) >= 10 else normalized
+        variants = {
+            normalized,
+            f"+{normalized}",
+            last10,
+            f"+{last10}",
+        }
+        return sorted(variant for variant in variants if variant), last10
+
+    def _resolve_active_session_for_inbound_number(self, normalized_from: str, active_statuses: list[str]) -> dict | None:
+        if not normalized_from:
+            return None
+
+        variants, last10 = self._phone_variants(normalized_from)
+        intake_query: dict = {
+            "status": {"$in": active_statuses},
+            "$or": [{"to_number": {"$in": variants}}],
+        }
+        if last10:
+            intake_query["$or"].append({"to_number": {"$regex": f"{re.escape(last10)}$"}})
+
+        session = self.db.intake_sessions.find_one(intake_query, sort=[("updated_at", -1)])
+        if session:
+            return session
+
+        # Resolve through patients collection when intake session number shape diverges.
+        patients_collection = getattr(self.db, "patients", None)
+        if patients_collection is None:
+            return None
+        patient_query: dict = {"$or": [{"phone_number": {"$in": variants}}]}
+        if last10:
+            patient_query["$or"].append({"phone_number": {"$regex": f"{re.escape(last10)}$"}})
+        patient = patients_collection.find_one(patient_query, {"patient_id": 1}) or {}
+        patient_id = str(patient.get("patient_id") or "").strip()
+        if not patient_id:
+            return None
+        return self.db.intake_sessions.find_one(
+            {"patient_id": patient_id, "status": {"$in": active_statuses}},
+            sort=[("updated_at", -1)],
+        )
 
     @staticmethod
     def _mask_phone_number(phone_number: str) -> str:
