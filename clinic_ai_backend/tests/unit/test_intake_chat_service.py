@@ -177,3 +177,86 @@ def test_generate_next_turn_exception_uses_global_fallback_metadata() -> None:
     assert update_payload["last_fallback_reason"] == "json_parse_error"
     assert update_payload["last_selected_topic"] == "associated_symptoms"
     assert service.whatsapp.sent
+
+
+def test_stop_request_detects_english_and_hindi_variants() -> None:
+    service = _build_service()
+
+    assert service._is_stop_request("stop") is True
+    assert service._is_stop_request("please stop") is True
+    assert service._is_stop_request("रुकना") is True
+    assert service._is_stop_request("நிறுத்து") is True
+    assert service._is_stop_request("बंद करो") is True
+    assert service._is_stop_request("நிறுத்துங்கள்") is True
+    assert service._is_stop_request("ఆపు") is True
+    assert service._is_stop_request("ఆపండి") is True
+    assert service._is_stop_request("বন্ধ") is True
+    assert service._is_stop_request("বন্ধ করুন") is True
+    assert service._is_stop_request("थांब") is True
+    assert service._is_stop_request("थांबा") is True
+    assert service._is_stop_request("ನಿಲ್ಲಿಸು") is True
+    assert service._is_stop_request("ನಿಲ್ಲಿಸಿ") is True
+    assert service._is_stop_request("continue") is False
+
+
+def test_stop_confirmation_message_respects_language() -> None:
+    service = _build_service()
+
+    assert service._stop_confirmation_message("en") == "Thank you. We will continue with your submitted answers."
+    assert service._stop_confirmation_message("hi-eng") == "Dhanyavaad. Hum aapke diye gaye jawaabon ke saath aage badhenge."
+    assert service._stop_confirmation_message("hi") == "धन्यवाद। हम आपके दिए गए जवाबों के साथ आगे बढ़ेंगे।"
+
+
+def test_detect_stop_request_prefers_llm_when_model_flags_opt_out() -> None:
+    service = IntakeChatService.__new__(IntakeChatService)
+
+    class _FakeOpenAI:
+        @staticmethod
+        def detect_patient_opt_out(*, message_text: str, language: str, recent_answers: list[dict]) -> dict:
+            assert message_text == "i want to stop now"
+            assert language == "en"
+            assert isinstance(recent_answers, list)
+            return {"is_opt_out": True, "confidence": 0.9, "reason": "patient asked to stop"}
+
+    service.openai = _FakeOpenAI()
+    result = service._detect_stop_request(
+        message_text="i want to stop now",
+        language="en",
+        answers=[{"question": "illness", "answer": "fever"}],
+    )
+    assert result["detected"] is True
+    assert result["source"] == "llm"
+    assert result["confidence"] == 0.9
+
+
+def test_detect_stop_request_uses_keyword_fallback_when_llm_errors() -> None:
+    service = IntakeChatService.__new__(IntakeChatService)
+
+    class _FailingOpenAI:
+        @staticmethod
+        def detect_patient_opt_out(*, message_text: str, language: str, recent_answers: list[dict]) -> dict:
+            raise RuntimeError("network issue")
+
+    service.openai = _FailingOpenAI()
+    result = service._detect_stop_request(message_text="stop", language="en", answers=[])
+    assert result["detected"] is True
+    assert result["source"] == "keyword_fallback"
+
+
+def test_opening_and_chief_complaint_use_language_catalog() -> None:
+    service = _build_service()
+
+    assert "नमस्ते" in service._opening_message("hi")
+    assert "Namaste" in service._opening_message("hi-eng")
+    assert "வணக்கம்" in service._opening_message("ta")
+    assert "నమస్తే" in service._opening_message("te")
+    assert "নমস্কার" in service._opening_message("bn")
+    assert "नमस्कार" in service._opening_message("mr")
+    assert "ನಮಸ್ಕಾರ" in service._opening_message("kn")
+    assert "मुख्य स्वास्थ्य समस्या" in service._chief_complaint_question("hi")
+    assert "mukhya swasthya samasya" in service._chief_complaint_question("hi-eng")
+    assert "முக்கிய உடல்நல பிரச்சினை" in service._chief_complaint_question("ta")
+    assert "ప్రధాన ఆరోగ్య సమస్య" in service._chief_complaint_question("te")
+    assert "প্রধান স্বাস্থ্য সমস্যাটি" in service._chief_complaint_question("bn")
+    assert "मुख्य आरोग्य समस्या" in service._chief_complaint_question("mr")
+    assert "ಮುಖ್ಯ ಆರೋಗ್ಯ ಸಮಸ್ಯೆ" in service._chief_complaint_question("kn")
