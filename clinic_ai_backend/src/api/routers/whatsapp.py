@@ -7,12 +7,14 @@ from src.application.services.intake_chat_service import IntakeChatService
 from src.application.services.intake_chat_service import NON_TEXT_MESSAGE_TRIGGER
 from src.core.config import get_settings
 
-router = APIRouter(prefix="/webhooks/whatsapp", tags=["Workflow"])
+# Support both paths to avoid production misconfiguration drift:
+# - /webhooks/whatsapp (legacy)
+# - /api/webhooks/whatsapp (common with API-prefixed routes)
+router = APIRouter(tags=["Workflow"])
 logger = logging.getLogger(__name__)
 
 
-@router.get("")
-def verify_webhook(
+def _verify_webhook(
     hub_mode: str = Query(alias="hub.mode"),
     hub_verify_token: str = Query(alias="hub.verify_token"),
     hub_challenge: str = Query(alias="hub.challenge"),
@@ -24,8 +26,25 @@ def verify_webhook(
     raise HTTPException(status_code=403, detail="Webhook verification failed")
 
 
-@router.post("")
-async def receive_webhook(request: Request) -> dict:
+@router.get("/webhooks/whatsapp")
+def verify_webhook_legacy(
+    hub_mode: str = Query(alias="hub.mode"),
+    hub_verify_token: str = Query(alias="hub.verify_token"),
+    hub_challenge: str = Query(alias="hub.challenge"),
+) -> str:
+    return _verify_webhook(hub_mode=hub_mode, hub_verify_token=hub_verify_token, hub_challenge=hub_challenge)
+
+
+@router.get("/api/webhooks/whatsapp")
+def verify_webhook_api(
+    hub_mode: str = Query(alias="hub.mode"),
+    hub_verify_token: str = Query(alias="hub.verify_token"),
+    hub_challenge: str = Query(alias="hub.challenge"),
+) -> str:
+    return _verify_webhook(hub_mode=hub_mode, hub_verify_token=hub_verify_token, hub_challenge=hub_challenge)
+
+
+async def _receive_webhook(request: Request) -> dict:
     """Receive incoming WhatsApp messages and continue intake flow."""
     body = await request.json()
     entries = body.get("entry", [])
@@ -55,6 +74,16 @@ async def receive_webhook(request: Request) -> dict:
                     )
 
     return {"received": True}
+
+
+@router.post("/webhooks/whatsapp")
+async def receive_webhook_legacy(request: Request) -> dict:
+    return await _receive_webhook(request)
+
+
+@router.post("/api/webhooks/whatsapp")
+async def receive_webhook_api(request: Request) -> dict:
+    return await _receive_webhook(request)
 
 
 def _extract_message_text(message: dict) -> str:
