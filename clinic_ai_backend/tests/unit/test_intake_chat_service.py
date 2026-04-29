@@ -363,3 +363,33 @@ def test_non_text_first_reply_after_template_still_starts_intake() -> None:
     assert service.whatsapp.sent
     assert service.whatsapp.sent[0][0] == "text"
     assert "main health problem" in service.whatsapp.sent[0][2].lower()
+
+
+def test_reply_matches_session_when_country_code_differs() -> None:
+    service = IntakeChatService.__new__(IntakeChatService)
+    fake_db = type("FakeDB", (), {})()
+    fake_db.intake_sessions = _FakeCollection()
+    fake_db.intake_sessions.record = {
+        "_id": "session-4",
+        "visit_id": "visit-4",
+        # Stored as local 10-digit number (common from registration input)
+        "to_number": "9876543210",
+        "patient_name": "Riya Sharma",
+        "language": "en",
+        "status": "awaiting_conversation_start",
+        "answers": [],
+    }
+    service.db = fake_db
+    service.whatsapp = _FakeWhatsApp()
+    service.openai = OpenAIQuestionClient()
+
+    service.handle_patient_reply(
+        # Inbound from WhatsApp often includes country code (e.g., India +91)
+        from_number="919876543210",
+        message_text="Hi",
+        message_id="wamid-4",
+    )
+
+    assert service.whatsapp.sent
+    assert service.whatsapp.sent[0][0] == "text"
+    assert "main health problem" in service.whatsapp.sent[0][2].lower()

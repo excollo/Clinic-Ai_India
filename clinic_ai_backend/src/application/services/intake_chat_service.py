@@ -109,10 +109,11 @@ class IntakeChatService:
     def handle_patient_reply(self, from_number: str, message_text: str, message_id: str | None = None) -> None:
         """Handle incoming WhatsApp reply and continue intake."""
         normalized_from = self._normalize_phone_number(from_number)
+        active_statuses = ["awaiting_conversation_start", "awaiting_illness", "in_progress"]
         session = self.db.intake_sessions.find_one(
             {
                 "to_number": normalized_from,
-                "status": {"$in": ["awaiting_conversation_start", "awaiting_illness", "in_progress"]},
+                "status": {"$in": active_statuses},
             },
             sort=[("updated_at", -1)],
         )
@@ -121,10 +122,24 @@ class IntakeChatService:
             session = self.db.intake_sessions.find_one(
                 {
                     "to_number": f"+{normalized_from}",
-                    "status": {"$in": ["awaiting_conversation_start", "awaiting_illness", "in_progress"]},
+                    "status": {"$in": active_statuses},
                 },
                 sort=[("updated_at", -1)],
             )
+        if not session and normalized_from:
+            # Handle country-code variants (e.g., stored 10-digit local number vs inbound E.164).
+            candidates = list(
+                self.db.intake_sessions.find(
+                    {"status": {"$in": active_statuses}},
+                    {"to_number": 1, "status": 1, "updated_at": 1, "language": 1, "patient_name": 1},
+                )
+                .sort("updated_at", -1)
+                .limit(100)
+            )
+            for candidate in candidates:
+                if self._phone_numbers_match(candidate.get("to_number", ""), normalized_from):
+                    session = candidate
+                    break
         if not session:
             return
 
@@ -886,6 +901,20 @@ class IntakeChatService:
     def _normalize_phone_number(phone_number: str) -> str:
         """Normalize phone number for reliable matching across webhook/provider formats."""
         return "".join(ch for ch in str(phone_number or "") if ch.isdigit())
+
+    @classmethod
+    def _phone_numbers_match(cls, stored_number: str, incoming_number: str) -> bool:
+        """Match phone numbers across local/country-code formats."""
+        stored = cls._normalize_phone_number(stored_number)
+        incoming = cls._normalize_phone_number(incoming_number)
+        if not stored or not incoming:
+            return False
+        if stored == incoming:
+            return True
+        # Last-10 matching supports common IN/US workflows when one side omits country code.
+        if len(stored) >= 10 and len(incoming) >= 10:
+            return stored[-10:] == incoming[-10:]
+        return False
 
     @staticmethod
     def _mask_phone_number(phone_number: str) -> str:
