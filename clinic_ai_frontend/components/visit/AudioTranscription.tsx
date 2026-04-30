@@ -15,6 +15,7 @@ interface Transcription {
   confidence_score: number;
   status: string;
   created_at: string;
+  error_message?: string;
   audio_duration_seconds?: number;
   diarized_turns?: Array<{ speaker: string; text: string }>;
 }
@@ -278,6 +279,7 @@ export default function AudioTranscription({ visitId, patientId, onTranscription
         confidence_score: 0,
         status: normalized === 'completed' ? 'COMPLETED' : normalized === 'failed' ? 'FAILED' : 'PROCESSING',
         created_at: status?.started_at || new Date().toISOString(),
+        error_message: status?.error_message || status?.error,
         audio_duration_seconds: status?.audio_duration_seconds,
       };
 
@@ -320,7 +322,13 @@ export default function AudioTranscription({ visitId, patientId, onTranscription
       if (normalized === 'failed' || normalized === 'stale_processing') {
         setTranscriptions([base]);
         setIsProcessing(false);
-        throw new Error(String(status?.error || status?.error_message || 'Transcription failed'));
+        const backendError = String(status?.error || status?.error_message || 'Transcription failed');
+        if (backendError.includes('AZURE_SPEECH_KEY')) {
+          toast.error('Transcription is not configured: AZURE_SPEECH_KEY is missing on backend.');
+        } else {
+          toast.error(backendError);
+        }
+        return;
       }
 
       setTranscriptions([base]);
@@ -552,7 +560,7 @@ export default function AudioTranscription({ visitId, patientId, onTranscription
 
                 {transcription.status.toLowerCase() === 'failed' && (
                   <p className="text-sm text-red-600">
-                    Transcription failed. Please try uploading the audio again.
+                    {transcription.error_message || 'Transcription failed. Please try again.'}
                   </p>
                 )}
               </div>

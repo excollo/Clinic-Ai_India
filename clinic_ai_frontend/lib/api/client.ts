@@ -770,6 +770,8 @@ class APIClient {
         source: string;
         status: string;
         raw_text: string;
+        ocr_text?: string;
+        image_count?: number;
         extracted_values: Array<{ label: string; value: number }>;
         flags: string[];
         doctor_decision?: string | null;
@@ -783,6 +785,25 @@ class APIClient {
 
   async createLabRecord(payload: { visit_id: string; source?: string; raw_text: string }) {
     const response = await this.client.post('/api/follow-through/lab-records', payload);
+    return response.data;
+  }
+
+  async createLabRecordWithImages(payload: {
+    visit_id: string;
+    source?: string;
+    raw_text?: string;
+    image_files: File[];
+  }) {
+    const formData = new FormData();
+    formData.append('visit_id', payload.visit_id);
+    formData.append('source', payload.source || 'whatsapp');
+    formData.append('raw_text', payload.raw_text || '');
+    payload.image_files.forEach((file) => formData.append('image_files', file));
+    const response = await this.client.post('/api/follow-through/lab-records/with-images', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    });
     return response.data;
   }
 

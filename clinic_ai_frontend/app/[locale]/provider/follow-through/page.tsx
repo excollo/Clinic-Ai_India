@@ -17,6 +17,8 @@ type LabItem = {
   source: string;
   status: string;
   raw_text: string;
+  ocr_text?: string;
+  image_count?: number;
   extracted_values: Array<{ label: string; value: number }>;
   flags: string[];
   doctor_decision?: string | null;
@@ -33,6 +35,7 @@ export default function FollowThroughPage() {
   const [creating, setCreating] = useState(false);
   const [visitId, setVisitId] = useState('');
   const [rawText, setRawText] = useState('');
+  const [selectedImages, setSelectedImages] = useState<File[]>([]);
   const [continuityByRecord, setContinuityByRecord] = useState<Record<string, string>>({});
 
   const loadQueue = async () => {
@@ -52,15 +55,25 @@ export default function FollowThroughPage() {
   }, []);
 
   const createLabRecord = async () => {
-    if (!visitId.trim() || !rawText.trim()) {
-      toast.error('Visit ID and lab text are required');
+    if (!visitId.trim() || (!rawText.trim() && selectedImages.length === 0)) {
+      toast.error('Visit ID and either lab text or images are required');
       return;
     }
     setCreating(true);
     try {
-      await apiClient.createLabRecord({ visit_id: visitId.trim(), source: 'whatsapp', raw_text: rawText.trim() });
+      if (selectedImages.length > 0) {
+        await apiClient.createLabRecordWithImages({
+          visit_id: visitId.trim(),
+          source: 'whatsapp',
+          raw_text: rawText.trim(),
+          image_files: selectedImages,
+        });
+      } else {
+        await apiClient.createLabRecord({ visit_id: visitId.trim(), source: 'whatsapp', raw_text: rawText.trim() });
+      }
       setVisitId('');
       setRawText('');
+      setSelectedImages([]);
       toast.success('Lab record added to intake queue');
       await loadQueue();
     } catch (error: any) {
@@ -113,6 +126,18 @@ export default function FollowThroughPage() {
             value={rawText}
             onChange={(e) => setRawText(e.target.value)}
           />
+          <Input
+            className="md:col-span-3"
+            type="file"
+            accept="image/*"
+            multiple
+            onChange={(e) => setSelectedImages(Array.from(e.target.files || []))}
+          />
+          {selectedImages.length > 0 && (
+            <p className="md:col-span-3 text-xs text-slate-500">
+              Selected images: {selectedImages.map((file) => file.name).join(', ')}
+            </p>
+          )}
           <Button onClick={createLabRecord} disabled={creating} className="md:col-span-3">
             {creating ? 'Adding...' : 'Add lab record'}
           </Button>
@@ -168,6 +193,16 @@ export default function FollowThroughPage() {
                   </div>
                 </div>
                 <p className="text-sm text-slate-700">{item.raw_text}</p>
+                {item.ocr_text && (
+                  <div className="rounded-md border border-blue-200 bg-blue-50 p-2 text-xs text-blue-900">
+                    OCR text ({item.image_count || 0} image{(item.image_count || 0) === 1 ? '' : 's'}): {item.ocr_text}
+                  </div>
+                )}
+                {item.extracted_values?.length > 0 && (
+                  <div className="rounded-md border border-slate-200 bg-slate-50 p-2 text-xs text-slate-800">
+                    Extracted values: {item.extracted_values.map((entry) => `${entry.label}: ${entry.value}`).join(', ')}
+                  </div>
+                )}
                 {item.flags?.length > 0 && (
                   <div className="rounded-md bg-amber-50 border border-amber-200 p-2 text-xs text-amber-800">
                     Flags: {item.flags.join(', ')}
