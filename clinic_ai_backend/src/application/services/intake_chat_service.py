@@ -30,6 +30,20 @@ class IntakeChatService:
     def start_intake(self, patient_id: str, visit_id: str, to_number: str, language: str) -> None:
         """Start intake with opening message; first clinical question comes after user reply."""
         normalized_to_number = self._normalize_phone_number(to_number)
+        existing_session = self.db.intake_sessions.find_one(
+            {"patient_id": patient_id, "visit_id": visit_id},
+            sort=[("updated_at", -1)],
+        ) or {}
+        existing_status = str(existing_session.get("status") or "")
+        # Idempotency: do not reset an active intake or resend greeting.
+        if existing_session and existing_status in {"awaiting_conversation_start", "awaiting_illness", "in_progress"}:
+            logger.info(
+                "intake_start_skipped_existing_active_session visit_id=%s patient_id=%s status=%s",
+                visit_id,
+                patient_id,
+                existing_status,
+            )
+            return
         opening_message = self._opening_message(language)
         patient_name = ""
         patients_collection = getattr(self.db, "patients", None)
@@ -120,12 +134,31 @@ class IntakeChatService:
         active_statuses = list(ACTIVE_SESSION_STATUSES)
         session = self._resolve_active_session_for_inbound_number(normalized_from, active_statuses)
         if not session:
+            bootstrapped = self._bootstrap_session_for_number(normalized_from)
+            if bootstrapped:
+                logger.info(
+                    "whatsapp_inbound_bootstrapped_session from=%s visit_id=%s patient_id=%s message_id=%s",
+                    self._mask_phone_number(normalized_from),
+                    str(bootstrapped.get("visit_id") or ""),
+                    str(bootstrapped.get("patient_id") or ""),
+                    message_id,
+                )
+                return
             logger.info(
                 "whatsapp_inbound_no_session from=%s message_id=%s",
                 self._mask_phone_number(normalized_from),
                 message_id,
             )
             return
+        logger.info(
+            "whatsapp_inbound_state_resolved from=%s visit_id=%s patient_id=%s status=%s qn=%s pending_question_present=%s",
+            self._mask_phone_number(normalized_from),
+            str(session.get("visit_id") or ""),
+            str(session.get("patient_id") or ""),
+            str(session.get("status") or ""),
+            int(session.get("question_number", 0) or 0),
+            bool(str(session.get("pending_question") or "").strip()),
+        )
 
         # Keep session destination aligned with the latest successful inbound sender format.
         if normalized_from and str(session.get("to_number") or "") != normalized_from:
@@ -136,6 +169,11 @@ class IntakeChatService:
             session["to_number"] = normalized_from
 
         if message_id and not self._claim_message(session["_id"], message_id):
+            logger.info(
+                "whatsapp_inbound_duplicate_message_id_ignored visit_id=%s message_id=%s",
+                str(session.get("visit_id") or ""),
+                message_id,
+            )
             return
 
         status = session.get("status")
@@ -147,8 +185,18 @@ class IntakeChatService:
         if cleaned == NON_TEXT_MESSAGE_TRIGGER and status != "awaiting_conversation_start":
             return
         if not self._claim_inbound_text(session, cleaned):
+            logger.info(
+                "whatsapp_inbound_duplicate_fingerprint_ignored visit_id=%s patient_id=%s",
+                str(session.get("visit_id") or ""),
+                str(session.get("patient_id") or ""),
+            )
             return
         if self._is_probable_duplicate_reply(session, cleaned):
+            logger.info(
+                "whatsapp_inbound_probable_duplicate_ignored visit_id=%s patient_id=%s",
+                str(session.get("visit_id") or ""),
+                str(session.get("patient_id") or ""),
+            )
             return
         self._remember_inbound_text(session["_id"], cleaned)
         if self._should_end_intake_via_llm(session=session, message_text=cleaned):
@@ -220,6 +268,26 @@ class IntakeChatService:
     def _save_answer_and_ask_next(self, session: dict, answer_text: str) -> None:
         current_question = str(session.get("pending_question", "") or "").strip()
         if not current_question:
+            logger.warning(
+                "intake_missing_pending_question_recovering visit_id=%s patient_id=%s",
+                str(session.get("visit_id") or ""),
+                str(session.get("patient_id") or ""),
+            )
+            self.db.intake_sessions.update_one(
+                {"_id": session["_id"], "status": "in_progress"},
+                {
+                    "$push": {
+                        "answers": {
+                            "question": "unmapped_follow_up",
+                            "topic": "clarification",
+                            "answer": answer_text,
+                        }
+                    },
+                    "$set": {"updated_at": datetime.now(timezone.utc)},
+                },
+            )
+            refreshed = self.db.intake_sessions.find_one({"_id": session["_id"]}) or session
+            self._generate_and_send_next_turn(refreshed)
             return
         claimed = self.db.intake_sessions.find_one_and_update(
             {
@@ -521,6 +589,14 @@ class IntakeChatService:
         model_topic: str,
     ) -> None:
         now = datetime.now(timezone.utc)
+        logger.info(
+            "intake_next_question_generated visit_id=%s patient_id=%s qn=%s topic=%s source=%s",
+            str(session.get("visit_id") or ""),
+            str(session.get("patient_id") or ""),
+            int(question_number),
+            str(topic or ""),
+            str(message_source or ""),
+        )
         self.db.intake_sessions.update_one(
             {"_id": session["_id"]},
             {
@@ -539,6 +615,12 @@ class IntakeChatService:
             },
         )
         self.whatsapp.send_text(session["to_number"], message)
+        logger.info(
+            "intake_next_question_sent visit_id=%s patient_id=%s to=%s",
+            str(session.get("visit_id") or ""),
+            str(session.get("patient_id") or ""),
+            self._mask_phone_number(str(session.get("to_number") or "")),
+        )
 
     def _complete_session(
         self,
@@ -553,6 +635,13 @@ class IntakeChatService:
         model_topic: str,
     ) -> None:
         now = datetime.now(timezone.utc)
+        logger.info(
+            "intake_session_completing visit_id=%s patient_id=%s topic=%s qn=%s",
+            str(session.get("visit_id") or ""),
+            str(session.get("patient_id") or ""),
+            str(topic or ""),
+            int(question_number),
+        )
         self.db.intake_sessions.update_one(
             {"_id": session["_id"]},
             {
@@ -577,6 +666,40 @@ class IntakeChatService:
         )
         self.whatsapp.send_text(session["to_number"], message)
         self._auto_generate_pre_visit_summary(session)
+
+    def _bootstrap_session_for_number(self, normalized_from: str) -> dict | None:
+        """
+        Auto-create intake session when webhook receives message before explicit intake scheduling.
+
+        This keeps patient flow alive even if start-intake trigger was missed.
+        """
+        if not normalized_from:
+            return None
+        variants, last10 = self._phone_variants(normalized_from)
+        patient_query: dict = {"$or": [{"phone_number": {"$in": variants}}]}
+        if last10:
+            patient_query["$or"].append({"phone_number": {"$regex": f"{re.escape(last10)}$"}})
+        patient = (self.db.patients.find_one(patient_query) if getattr(self.db, "patients", None) is not None else None) or {}
+        patient_id = str(patient.get("patient_id") or "").strip()
+        if not patient_id:
+            return None
+        visit = self.db.visits.find_one(
+            {
+                "patient_id": patient_id,
+                "status": {"$in": ["open", "scheduled", "queued", "in_queue", "in_progress"]},
+            },
+            sort=[("updated_at", -1), ("created_at", -1)],
+        ) or self.db.visits.find_one({"patient_id": patient_id}, sort=[("updated_at", -1), ("created_at", -1)])
+        visit_id = str((visit or {}).get("visit_id") or (visit or {}).get("id") or "").strip()
+        if not visit_id:
+            return None
+        self.start_intake(
+            patient_id=patient_id,
+            visit_id=visit_id,
+            to_number=normalized_from,
+            language=str(patient.get("preferred_language") or "en"),
+        )
+        return self.db.intake_sessions.find_one({"patient_id": patient_id, "visit_id": visit_id}) or None
 
     def _supersede_other_active_sessions_for_number(
         self,
