@@ -32,7 +32,13 @@ Negative examples:
 
 Return strict JSON only:
 {
+  "intent": "continue",
   "is_opt_out": true,
   "confidence": 0.0,
   "reason": "short explanation"
 }
+
+Where:
+- intent is one of: "opt_out", "continue", "uncertain"
+- if intent is "opt_out", then is_opt_out must be true
+- if intent is "continue" or "uncertain", then is_opt_out must be false

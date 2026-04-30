@@ -907,10 +907,13 @@ class IntakeChatService:
                 str(session.get("_id") or ""),
             )
             return False
+        if str(decision.get("intent") or "") != "opt_out":
+            return False
         if not bool(decision.get("is_opt_out")):
             return False
         confidence = float(decision.get("confidence") or 0.0)
-        return confidence >= 0.5
+        # Pure LLM gating: only stop on high-confidence opt-out intent.
+        return confidence >= 0.85
 
     @staticmethod
     def _closing_message(language: str, patient_name: str | None) -> str:

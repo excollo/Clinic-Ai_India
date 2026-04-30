@@ -441,6 +441,8 @@ class OpenAIQuestionClient:
             raise RuntimeError("opt_out_detection_json_parse_error") from exc
         if not isinstance(result, dict):
             raise RuntimeError("opt_out_detection_schema_invalid")
+        if result.get("intent") not in {"opt_out", "continue", "uncertain"}:
+            raise RuntimeError("opt_out_detection_schema_invalid")
         if not isinstance(result.get("is_opt_out"), bool):
             raise RuntimeError("opt_out_detection_schema_invalid")
         if not isinstance(result.get("confidence"), (int, float)):
@@ -448,6 +450,12 @@ class OpenAIQuestionClient:
         if not isinstance(result.get("reason"), str):
             raise RuntimeError("opt_out_detection_schema_invalid")
 
+        intent = str(result.get("intent") or "")
+        is_opt_out = bool(result.get("is_opt_out"))
+        if intent == "opt_out" and not is_opt_out:
+            raise RuntimeError("opt_out_detection_schema_invalid")
+        if intent in {"continue", "uncertain"} and is_opt_out:
+            raise RuntimeError("opt_out_detection_schema_invalid")
         result["confidence"] = float(result["confidence"])
         return result
 
