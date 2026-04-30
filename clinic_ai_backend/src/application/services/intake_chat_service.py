@@ -15,6 +15,7 @@ from src.core.config import get_settings
 
 NON_TEXT_MESSAGE_TRIGGER = "__non_text_message__"
 MIN_FOLLOW_UP_QUESTIONS = 3
+ACTIVE_SESSION_STATUSES = ("awaiting_conversation_start", "awaiting_illness", "in_progress")
 logger = logging.getLogger(__name__)
 
 
@@ -63,6 +64,13 @@ class IntakeChatService:
             },
             upsert=True,
         )
+        current_session = self.db.intake_sessions.find_one({"visit_id": visit_id}) or {}
+        if normalized_to_number:
+            self._supersede_other_active_sessions_for_number(
+                to_number=normalized_to_number,
+                keep_session_id=current_session.get("_id"),
+                reason="new_intake_started",
+            )
         settings = get_settings()
         if settings.whatsapp_intake_template_name:
             language_code = (
@@ -109,7 +117,7 @@ class IntakeChatService:
     def handle_patient_reply(self, from_number: str, message_text: str, message_id: str | None = None) -> None:
         """Handle incoming WhatsApp reply and continue intake."""
         normalized_from = self._normalize_phone_number(from_number)
-        active_statuses = ["awaiting_conversation_start", "awaiting_illness", "in_progress"]
+        active_statuses = list(ACTIVE_SESSION_STATUSES)
         session = self._resolve_active_session_for_inbound_number(normalized_from, active_statuses)
         if not session:
             logger.info(
@@ -147,6 +155,11 @@ class IntakeChatService:
             self.db.intake_sessions.update_one(
                 {"_id": session["_id"]},
                 {"$set": {"status": "stopped", "updated_at": datetime.now(timezone.utc)}},
+            )
+            self._supersede_other_active_sessions_for_number(
+                to_number=str(session.get("to_number") or ""),
+                keep_session_id=session.get("_id"),
+                reason="patient_opted_out",
             )
             end_msg = (
                 "Thank you. We will continue with your submitted answers."
@@ -557,8 +570,45 @@ class IntakeChatService:
                 }
             },
         )
+        self._supersede_other_active_sessions_for_number(
+            to_number=str(session.get("to_number") or ""),
+            keep_session_id=session.get("_id"),
+            reason="session_completed",
+        )
         self.whatsapp.send_text(session["to_number"], message)
         self._auto_generate_pre_visit_summary(session)
+
+    def _supersede_other_active_sessions_for_number(
+        self,
+        *,
+        to_number: str,
+        keep_session_id: object | None,
+        reason: str,
+    ) -> None:
+        normalized = self._normalize_phone_number(to_number)
+        if not normalized:
+            return
+        variants, last10 = self._phone_variants(normalized)
+        query: dict = {
+            "status": {"$in": list(ACTIVE_SESSION_STATUSES)},
+            "$or": [{"to_number": {"$in": variants}}],
+        }
+        if last10:
+            query["$or"].append({"to_number": {"$regex": f"{re.escape(last10)}$"}})
+        if keep_session_id is not None:
+            query["_id"] = {"$ne": keep_session_id}
+        self.db.intake_sessions.update_many(
+            query,
+            {
+                "$set": {
+                    "status": "superseded",
+                    "pending_question": None,
+                    "pending_topic": None,
+                    "superseded_reason": reason,
+                    "updated_at": datetime.now(timezone.utc),
+                }
+            },
+        )
 
     def _planner_fallback_topic(self, session: dict) -> str:
         context = {
@@ -973,16 +1023,19 @@ class IntakeChatService:
             return None
 
         variants, last10 = self._phone_variants(normalized_from)
-        intake_query: dict = {
-            "status": {"$in": active_statuses},
-            "$or": [{"to_number": {"$in": variants}}],
-        }
+        base_or = [{"to_number": {"$in": variants}}]
         if last10:
-            intake_query["$or"].append({"to_number": {"$regex": f"{re.escape(last10)}$"}})
+            base_or.append({"to_number": {"$regex": f"{re.escape(last10)}$"}})
+        status_priority = ["in_progress", "awaiting_illness", "awaiting_conversation_start"]
+        eligible_statuses = [status for status in status_priority if status in active_statuses]
 
-        session = self.db.intake_sessions.find_one(intake_query, sort=[("updated_at", -1)])
-        if session:
-            return session
+        for status in eligible_statuses:
+            session = self.db.intake_sessions.find_one(
+                {"status": status, "$or": base_or},
+                sort=[("updated_at", -1)],
+            )
+            if session:
+                return session
 
         # Resolve through patients collection when intake session number shape diverges.
         patients_collection = getattr(self.db, "patients", None)
@@ -995,10 +1048,14 @@ class IntakeChatService:
         patient_id = str(patient.get("patient_id") or "").strip()
         if not patient_id:
             return None
-        return self.db.intake_sessions.find_one(
-            {"patient_id": patient_id, "status": {"$in": active_statuses}},
-            sort=[("updated_at", -1)],
-        )
+        for status in eligible_statuses:
+            session = self.db.intake_sessions.find_one(
+                {"patient_id": patient_id, "status": status},
+                sort=[("updated_at", -1)],
+            )
+            if session:
+                return session
+        return None
 
     @staticmethod
     def _mask_phone_number(phone_number: str) -> str:
