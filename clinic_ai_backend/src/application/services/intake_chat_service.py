@@ -175,78 +175,83 @@ class IntakeChatService:
                 message_id,
             )
             return
-
-        status = session.get("status")
-        cleaned = (message_text or "").strip()
-        if not cleaned:
-            if status != "awaiting_conversation_start":
+        try:
+            status = session.get("status")
+            cleaned = (message_text or "").strip()
+            if not cleaned:
+                if status != "awaiting_conversation_start":
+                    return
+                cleaned = NON_TEXT_MESSAGE_TRIGGER
+            if cleaned == NON_TEXT_MESSAGE_TRIGGER and status != "awaiting_conversation_start":
                 return
-            cleaned = NON_TEXT_MESSAGE_TRIGGER
-        if cleaned == NON_TEXT_MESSAGE_TRIGGER and status != "awaiting_conversation_start":
-            return
-        if not self._claim_inbound_text(session, cleaned):
-            logger.info(
-                "whatsapp_inbound_duplicate_fingerprint_ignored visit_id=%s patient_id=%s",
-                str(session.get("visit_id") or ""),
-                str(session.get("patient_id") or ""),
-            )
-            return
-        if self._is_probable_duplicate_reply(session, cleaned):
-            logger.info(
-                "whatsapp_inbound_probable_duplicate_ignored visit_id=%s patient_id=%s",
-                str(session.get("visit_id") or ""),
-                str(session.get("patient_id") or ""),
-            )
-            return
-        self._remember_inbound_text(session["_id"], cleaned)
-        if self._should_end_intake_via_llm(session=session, message_text=cleaned):
-            self.db.intake_sessions.update_one(
-                {"_id": session["_id"]},
-                {"$set": {"status": "stopped", "updated_at": datetime.now(timezone.utc)}},
-            )
-            self._supersede_other_active_sessions_for_number(
-                to_number=str(session.get("to_number") or ""),
-                keep_session_id=session.get("_id"),
-                reason="patient_opted_out",
-            )
-            end_msg = (
-                "Thank you. We will continue with your submitted answers."
-                if session.get("language") == "en"
-                else "Dhanyavaad. Hum aapke diye gaye jawaabon ke saath aage badhenge."
-            )
-            self.whatsapp.send_text(session["to_number"], end_msg)
-            self._auto_generate_pre_visit_summary(session)
-            return
-
-        if status == "awaiting_conversation_start":
-            claimed = self.db.intake_sessions.find_one_and_update(
-                {"_id": session["_id"], "status": "awaiting_conversation_start"},
-                {
-                    "$set": {
-                        "status": "awaiting_illness",
-                        "updated_at": datetime.now(timezone.utc),
-                    }
-                },
-            )
-            if not claimed:
+            if not self._claim_inbound_text(session, cleaned):
+                logger.info(
+                    "whatsapp_inbound_duplicate_fingerprint_ignored visit_id=%s patient_id=%s",
+                    str(session.get("visit_id") or ""),
+                    str(session.get("patient_id") or ""),
+                )
                 return
-            # Product behavior: first inbound message (any content) should only start intake
-            # and ask the chief complaint question. The next user message becomes illness.
-            self.whatsapp.send_text(
-                session["to_number"],
-                self._chief_complaint_question(session.get("language", "en")),
-            )
-            return
-
-        if status == "awaiting_illness":
-            self._save_illness_and_generate_questions(session, cleaned)
-            return
-
-        if status == "in_progress":
-            if self._should_treat_as_illness_correction(session, cleaned):
-                self._replace_illness_and_regenerate(session, cleaned)
+            if self._is_probable_duplicate_reply(session, cleaned):
+                logger.info(
+                    "whatsapp_inbound_probable_duplicate_ignored visit_id=%s patient_id=%s",
+                    str(session.get("visit_id") or ""),
+                    str(session.get("patient_id") or ""),
+                )
                 return
-            self._save_answer_and_ask_next(session, cleaned)
+            self._remember_inbound_text(session["_id"], cleaned)
+            if self._should_end_intake_via_llm(session=session, message_text=cleaned):
+                self.db.intake_sessions.update_one(
+                    {"_id": session["_id"]},
+                    {"$set": {"status": "stopped", "updated_at": datetime.now(timezone.utc)}},
+                )
+                self._supersede_other_active_sessions_for_number(
+                    to_number=str(session.get("to_number") or ""),
+                    keep_session_id=session.get("_id"),
+                    reason="patient_opted_out",
+                )
+                end_msg = (
+                    "Thank you. We will continue with your submitted answers."
+                    if session.get("language") == "en"
+                    else "Dhanyavaad. Hum aapke diye gaye jawaabon ke saath aage badhenge."
+                )
+                self.whatsapp.send_text(session["to_number"], end_msg)
+                self._auto_generate_pre_visit_summary(session)
+                return
+
+            if status == "awaiting_conversation_start":
+                claimed = self.db.intake_sessions.find_one_and_update(
+                    {"_id": session["_id"], "status": "awaiting_conversation_start"},
+                    {
+                        "$set": {
+                            "status": "awaiting_illness",
+                            "updated_at": datetime.now(timezone.utc),
+                        }
+                    },
+                )
+                if not claimed:
+                    return
+                # Product behavior: first inbound message (any content) should only start intake
+                # and ask the chief complaint question. The next user message becomes illness.
+                self.whatsapp.send_text(
+                    session["to_number"],
+                    self._chief_complaint_question(session.get("language", "en")),
+                )
+                return
+
+            if status == "awaiting_illness":
+                self._save_illness_and_generate_questions(session, cleaned)
+                return
+
+            if status == "in_progress":
+                if self._should_treat_as_illness_correction(session, cleaned):
+                    self._replace_illness_and_regenerate(session, cleaned)
+                    return
+                self._save_answer_and_ask_next(session, cleaned)
+        except Exception:
+            # Keep webhook retries useful: rollback processed message marker if this turn failed.
+            if message_id:
+                self._unclaim_message(session["_id"], message_id)
+            raise
 
     def _save_illness_and_generate_questions(self, session: dict, illness_text: str) -> None:
         claimed = self.db.intake_sessions.find_one_and_update(
@@ -261,6 +266,15 @@ class IntakeChatService:
             },
         )
         if not claimed:
+            latest = self.db.intake_sessions.find_one({"_id": session["_id"]}) or {}
+            latest_status = str(latest.get("status") or "")
+            if latest_status == "in_progress":
+                logger.warning(
+                    "intake_awaiting_illness_claim_failed_recovering_as_in_progress visit_id=%s patient_id=%s",
+                    str(session.get("visit_id") or ""),
+                    str(session.get("patient_id") or ""),
+                )
+                self._save_answer_and_ask_next(latest, illness_text)
             return
         refreshed = self.db.intake_sessions.find_one({"_id": session["_id"]}) or claimed
         self._generate_and_send_next_turn(refreshed)
@@ -779,6 +793,12 @@ class IntakeChatService:
             {"$push": {"processed_message_ids": message_id}},
         )
         return result.modified_count == 1
+
+    def _unclaim_message(self, session_id: object, message_id: str) -> None:
+        self.db.intake_sessions.update_one(
+            {"_id": session_id},
+            {"$pull": {"processed_message_ids": message_id}},
+        )
 
     def _should_treat_as_illness_correction(self, session: dict, message_text: str) -> bool:
         illness = str(session.get("illness", "") or "").strip()
