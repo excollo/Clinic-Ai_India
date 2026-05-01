@@ -1,0 +1,190 @@
+import { useState } from 'react'
+import { Link } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
+
+function SignupPage() {
+  const navigate = useNavigate()
+  const [showPassword, setShowPassword] = useState(false)
+
+  return (
+    <div className="font-manrope text-on-background bg-surface min-h-screen pb-24">
+      <header className="sticky top-0 z-50 flex justify-between items-center px-6 py-4 w-full bg-white/80 backdrop-blur-md shadow-sm border-b border-slate-200">
+        <div className="flex items-center gap-2">
+          <span className="text-2xl font-bold tracking-tight text-teal-600">
+            MedGenie
+          </span>
+        </div>
+        <div className="flex items-center gap-4">
+          <Link
+            to="/login"
+            className="flex items-center gap-2 p-2 rounded-lg hover:bg-slate-50 transition-colors text-slate-500"
+          >
+            <span className="material-symbols-outlined">account_circle</span>
+            <span className="text-sm font-semibold">Login</span>
+          </Link>
+        </div>
+      </header>
+
+      <main className="min-h-[calc(100vh-144px)] flex items-center justify-center py-16 px-6">
+        <div className="w-full max-w-[640px] bg-white rounded-xl shadow-card overflow-hidden border border-slate-100">
+          <div className="bg-surface-container-low px-8 py-6 border-b border-slate-200">
+            <div className="flex justify-between items-end">
+              <h1 className="text-4xl font-bold text-on-surface">Create a new account</h1>
+            </div>
+          </div>
+
+          <form
+            className="p-8 space-y-6"
+            onSubmit={(e) => {
+              e.preventDefault()
+              const mobileValue =
+                (document.getElementById('mobile') as HTMLInputElement | null)?.value?.trim() ?? ''
+              navigate('/signup-otp', {
+                state: { mobile: mobileValue || '+91 98*** *210' },
+              })
+            }}
+          >
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="space-y-1 col-span-full">
+                <label className="text-sm font-semibold text-on-surface-variant" htmlFor="full_name">
+                  Full Name
+                </label>
+                <div className="relative">
+                  <input className="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-3 focus:ring-2 focus:ring-primary focus:border-primary outline-none" id="full_name" placeholder="Dr. John Doe" type="text" />
+                  <span className="absolute right-4 top-1/2 -translate-y-1/2 material-symbols-outlined text-slate-400">person</span>
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-sm font-semibold text-on-surface-variant" htmlFor="mobile">
+                  Mobile Number
+                </label>
+                <div className="relative">
+                  <input className="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-3 focus:ring-2 focus:ring-primary focus:border-primary outline-none" id="mobile" placeholder="+91 00000 00000" type="tel" />
+                  <span className="absolute right-4 top-1/2 -translate-y-1/2 material-symbols-outlined text-slate-400">smartphone</span>
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-sm font-semibold text-on-surface-variant" htmlFor="email">
+                  Email (Optional)
+                </label>
+                <div className="relative">
+                  <input className="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-3 focus:ring-2 focus:ring-primary focus:border-primary outline-none" id="email" placeholder="john.doe@medgenie.com" type="email" />
+                  <span className="absolute right-4 top-1/2 -translate-y-1/2 material-symbols-outlined text-slate-400">mail</span>
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-sm font-semibold text-on-surface-variant" htmlFor="mci">
+                  Medical Registration Number (Optional)
+                </label>
+                <div className="relative">
+                  <input className="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-3 focus:ring-2 focus:ring-primary focus:border-primary outline-none" id="mci" placeholder="MCI/12345" type="text" />
+                  <span className="absolute right-4 top-1/2 -translate-y-1/2 material-symbols-outlined text-slate-400">badge</span>
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-sm font-semibold text-on-surface-variant" htmlFor="specialty">
+                  Specialty
+                </label>
+                <div className="relative">
+                  <select className="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-3 appearance-none focus:ring-2 focus:ring-primary focus:border-primary outline-none text-slate-600" id="specialty" defaultValue="">
+                    <option disabled value="">
+                      Select Specialty
+                    </option>
+                    <option value="general">General Physician</option>
+                    <option value="cardio">Cardiologist</option>
+                    <option value="pediatric">Pediatrician</option>
+                    <option value="ortho">Orthopedic Surgeon</option>
+                    <option value="derm">Dermatologist</option>
+                  </select>
+                  <span className="absolute right-4 top-1/2 -translate-y-1/2 material-symbols-outlined text-slate-400 pointer-events-none">stethoscope</span>
+                </div>
+              </div>
+
+              <div className="space-y-1 col-span-full">
+                <label className="text-sm font-semibold text-on-surface-variant" htmlFor="password">
+                  Password
+                </label>
+                <div className="relative">
+                  <input
+                    className="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-3 pr-12 focus:ring-2 focus:ring-primary focus:border-primary outline-none"
+                    id="password"
+                    placeholder="Create a secure password"
+                    type={showPassword ? 'text' : 'password'}
+                  />
+                  <button
+                    className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-primary"
+                    onClick={() => setShowPassword((prev) => !prev)}
+                    type="button"
+                  >
+                    <span className="material-symbols-outlined">
+                      {showPassword ? 'visibility_off' : 'visibility'}
+                    </span>
+                  </button>
+                </div>
+                <p className="text-xs text-slate-500 flex items-center gap-1 mt-1">
+                  <span className="material-symbols-outlined text-sm">info</span>
+                  Minimum 8 characters with at least one number and one special character.
+                </p>
+              </div>
+            </div>
+
+            <div className="bg-primary-fixed/20 border-l-2 border-primary p-4 rounded-r-lg">
+              <div className="flex gap-3">
+                <span className="material-symbols-outlined text-primary">auto_awesome</span>
+                <div className="space-y-1">
+                  <p className="text-sm font-semibold text-on-primary-fixed">AI-Assisted Verification</p>
+                  <p className="text-sm text-on-primary-fixed-variant opacity-80">
+                    We use real-time MCI/NMC database verification to expedite your profile approval process.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="pt-2 flex flex-col gap-3">
+              <button className="w-full py-4 bg-primary text-on-primary text-xl font-semibold rounded-lg hover:bg-primary-container transition-all shadow-lg active:scale-[0.98]" type="submit">
+                Save &amp; Continue
+              </button>
+              <p className="text-center text-sm text-slate-500">
+                By registering, you agree to our{' '}
+                <a className="text-primary font-semibold hover:underline" href="#">
+                  Terms of Service
+                </a>{' '}
+                and{' '}
+                <a className="text-primary font-semibold hover:underline" href="#">
+                  Privacy Policy
+                </a>
+                .
+              </p>
+            </div>
+          </form>
+        </div>
+      </main>
+
+      <footer className="fixed bottom-0 w-full z-50 flex justify-between items-center px-10 py-6 bg-white border-t border-slate-200 shadow-[0_-4px_20px_rgba(15,23,42,0.05)]">
+        <div className="flex items-center gap-2">
+          <span className="font-bold text-teal-600 text-sm">MedGenie</span>
+          <span className="text-sm text-slate-600">
+            © 2024 MedGenie. Empathetic Precision in Healthcare.
+          </span>
+        </div>
+        <div className="flex gap-6">
+          <a className="text-sm text-slate-500 hover:text-teal-500 hover:underline" href="#">
+            Privacy Policy
+          </a>
+          <a className="text-sm text-slate-500 hover:text-teal-500 hover:underline" href="#">
+            Terms of Service
+          </a>
+          <a className="text-sm text-slate-500 hover:text-teal-500 hover:underline" href="#">
+            Help Center
+          </a>
+        </div>
+      </footer>
+    </div>
+  )
+}
+
+export default SignupPage

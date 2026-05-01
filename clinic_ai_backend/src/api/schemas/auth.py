@@ -20,6 +20,37 @@ class UserLoginRequest(BaseModel):
     password: str = Field(min_length=1, max_length=256)
 
 
+class ForgotPasswordRequest(BaseModel):
+    identifier: str = Field(min_length=3, max_length=254, description="Registered email or phone")
+
+
+class ForgotPasswordLegacyRequest(BaseModel):
+    email: str = Field(min_length=3, max_length=254)
+
+
+class ForgotPasswordOtpVerifyRequest(BaseModel):
+    identifier: str = Field(min_length=3, max_length=254, description="Registered email or phone")
+    otp: str = Field(min_length=4, max_length=8)
+
+
+class ForgotPasswordOtpGenerateResponse(BaseModel):
+    message: str
+
+
+class ForgotPasswordOtpVerifyResponse(BaseModel):
+    message: str
+    reset_token: str
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str = Field(min_length=8, max_length=200)
+    password: str = Field(min_length=8, max_length=256)
+
+
+class MessageResponse(BaseModel):
+    message: str
+
+
 class UserRoleUpdateRequest(BaseModel):
     role: str = Field(min_length=1, max_length=40)
 
