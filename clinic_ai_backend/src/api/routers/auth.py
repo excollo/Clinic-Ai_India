@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-import random
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -11,13 +10,6 @@ from fastapi.security import OAuth2PasswordBearer
 from src.adapters.db.mongo.client import get_database
 from src.api.schemas.auth import (
     AuthResponse,
-    ForgotPasswordLegacyRequest,
-    ForgotPasswordOtpGenerateResponse,
-    ForgotPasswordOtpVerifyRequest,
-    ForgotPasswordOtpVerifyResponse,
-    ForgotPasswordRequest,
-    MessageResponse,
-    ResetPasswordRequest,
     UserLoginRequest,
     UserRegisterRequest,
     UserResponse,
@@ -28,15 +20,6 @@ from src.core.config import get_settings
 
 router = APIRouter(prefix="/api/auth", tags=["Authentication"])
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
-
-
-def _find_user_by_identifier(db, identifier: str) -> dict | None:
-    ident = identifier.strip()
-    return (
-        db.users.find_one({"email": ident})
-        or db.users.find_one({"phone": ident})
-        or db.users.find_one({"username": ident})
-    )
 
 
 def _as_user_response(user_doc: dict) -> UserResponse:
@@ -126,115 +109,6 @@ def login(payload: UserLoginRequest) -> AuthResponse:
     if not bool(user_doc.get("is_active", True)):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User account is inactive")
     return _build_auth_response(user_doc)
-
-
-@router.post("/forgot-password/request-otp", response_model=ForgotPasswordOtpGenerateResponse)
-def request_forgot_password_otp(payload: ForgotPasswordRequest) -> ForgotPasswordOtpGenerateResponse:
-    db = get_database()
-    user_doc = _find_user_by_identifier(db, payload.identifier)
-
-    # Return generic message to avoid user-enumeration leaks.
-    if not user_doc:
-        return ForgotPasswordOtpGenerateResponse(
-            message="If this account exists, an OTP has been sent to the registered contact."
-        )
-
-    now = datetime.now(timezone.utc)
-    otp = f"{random.randint(0, 999999):06d}"
-    db.users.update_one(
-        {"id": user_doc["id"]},
-        {
-            "$set": {
-                "password_reset_otp": otp,
-                "password_reset_otp_expires_at": now.timestamp() + 600,
-                "updated_at": now,
-            }
-        },
-    )
-    return ForgotPasswordOtpGenerateResponse(
-        message=f"OTP generated successfully. Use {otp} for local testing."
-    )
-
-
-@router.post("/forgot-password")
-def forgot_password_legacy(payload: ForgotPasswordLegacyRequest) -> dict:
-    db = get_database()
-    user_doc = db.users.find_one({"email": payload.email.strip()})
-    if not user_doc:
-        return {"message": "If this account exists, reset details were generated.", "reset_token": ""}
-
-    now = datetime.now(timezone.utc)
-    reset_token = str(uuid4())
-    db.users.update_one(
-        {"id": user_doc["id"]},
-        {
-            "$set": {
-                "password_reset_token": reset_token,
-                "password_reset_token_expires_at": now.timestamp() + 1800,
-                "updated_at": now,
-            }
-        },
-    )
-    return {"message": "Password reset token generated", "reset_token": reset_token}
-
-
-@router.post("/forgot-password/verify-otp", response_model=ForgotPasswordOtpVerifyResponse)
-def verify_forgot_password_otp(payload: ForgotPasswordOtpVerifyRequest) -> ForgotPasswordOtpVerifyResponse:
-    db = get_database()
-    user_doc = _find_user_by_identifier(db, payload.identifier)
-    if not user_doc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found")
-
-    expected_otp = str(user_doc.get("password_reset_otp") or "")
-    expires_at_ts = float(user_doc.get("password_reset_otp_expires_at") or 0)
-    now_ts = datetime.now(timezone.utc).timestamp()
-    if not expected_otp or payload.otp.strip() != expected_otp:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid OTP")
-    if now_ts > expires_at_ts:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="OTP has expired")
-
-    reset_token = str(uuid4())
-    db.users.update_one(
-        {"id": user_doc["id"]},
-        {
-            "$set": {
-                "password_reset_token": reset_token,
-                "password_reset_token_expires_at": now_ts + 1800,
-                "password_reset_otp": None,
-                "password_reset_otp_expires_at": None,
-                "updated_at": datetime.now(timezone.utc),
-            }
-        },
-    )
-    return ForgotPasswordOtpVerifyResponse(
-        message="OTP verified successfully",
-        reset_token=reset_token,
-    )
-
-
-@router.post("/reset-password", response_model=MessageResponse)
-def reset_password(payload: ResetPasswordRequest) -> MessageResponse:
-    db = get_database()
-    user_doc = db.users.find_one({"password_reset_token": payload.token.strip()})
-    if not user_doc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid reset token")
-
-    expires_at_ts = float(user_doc.get("password_reset_token_expires_at") or 0)
-    if datetime.now(timezone.utc).timestamp() > expires_at_ts:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Reset token has expired")
-
-    db.users.update_one(
-        {"id": user_doc["id"]},
-        {
-            "$set": {
-                "hashed_password": hash_password(payload.password),
-                "password_reset_token": None,
-                "password_reset_token_expires_at": None,
-                "updated_at": datetime.now(timezone.utc),
-            }
-        },
-    )
-    return MessageResponse(message="Password reset successful")
 
 
 @router.get("/me", response_model=UserResponse)
