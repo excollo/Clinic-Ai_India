@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from datetime import date, datetime, timezone
+import re
 from uuid import uuid4
 
 from src.adapters.db.mongo.client import get_database
@@ -34,6 +35,7 @@ class GenerateIndiaClinicalNoteUseCase:
         transcription_job_id: str | None = None,
         force_regenerate: bool = False,
         follow_up_date: date | None = None,
+        follow_up_time: str | None = None,
     ) -> dict:
         """Generate India note and save as canonical default artifact."""
         job = self._resolve_transcription_job(
@@ -54,10 +56,14 @@ class GenerateIndiaClinicalNoteUseCase:
         context = self._build_context(patient_id=patient_id, visit_id=visit_id, job=job)
         if follow_up_date is not None:
             context["staff_confirmed_follow_up_date"] = follow_up_date.isoformat()
+        if follow_up_time:
+            context["staff_confirmed_follow_up_time"] = str(follow_up_time).strip()
         payload = self._generate_payload(context)
         if follow_up_date is not None:
             payload["follow_up_date"] = follow_up_date.isoformat()
             payload["follow_up_in"] = None
+        if follow_up_time:
+            payload["follow_up_time"] = str(follow_up_time).strip()
             payload = self._normalize_payload(payload, context=context)
         version = self._next_version(patient_id=patient_id, visit_id=visit_id, note_type="india_clinical")
         note_doc = {
@@ -228,6 +234,7 @@ class GenerateIndiaClinicalNoteUseCase:
         payload.setdefault("rx", [])
         payload.setdefault("investigations", [])
         payload.setdefault("red_flags", [])
+        payload.setdefault("follow_up_time", None)
         payload.setdefault("doctor_notes", None)
         payload.setdefault("chief_complaint", self._chief_complaint(context=context))
 
@@ -276,6 +283,11 @@ class GenerateIndiaClinicalNoteUseCase:
             payload["follow_up_date"] = None
         if payload.get("follow_up_date") and isinstance(payload["follow_up_date"], (datetime, date)):
             payload["follow_up_date"] = payload["follow_up_date"].isoformat()
+        follow_up_time_raw = str(payload.get("follow_up_time") or "").strip()
+        if follow_up_time_raw and re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d", follow_up_time_raw):
+            payload["follow_up_time"] = follow_up_time_raw
+        else:
+            payload["follow_up_time"] = None
         return payload
 
     def _fallback_payload(self, *, context: dict) -> dict:
@@ -291,6 +303,7 @@ class GenerateIndiaClinicalNoteUseCase:
             ],
             "follow_up_in": "7 days",
             "follow_up_date": None,
+            "follow_up_time": None,
             "doctor_notes": None,
             "chief_complaint": self._chief_complaint(context=context),
             "data_gaps": context.get("data_gaps", []),

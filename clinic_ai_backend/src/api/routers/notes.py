@@ -88,6 +88,7 @@ def _build_clinical_note_template(*, doctor_type: str, language_style: str, regi
         'red_flags': ['<red_flag_1>', '<red_flag_2>'],
         'follow_up_in': '<follow_up_interval>',
         'follow_up_date': '<yyyy-mm-dd_or_null>',
+        'follow_up_time': '<hh:mm_or_null>',
         'doctor_notes': note_hint,
         'chief_complaint': '<chief_complaint>',
         'data_gaps': ['<missing_info_1>', '<missing_info_2>'],
@@ -122,6 +123,7 @@ def generate_india_note(request: NoteGenerateRequest) -> NoteGenerateResponse:
         transcription_job_id=request.transcription_job_id,
         force_regenerate=True,
         follow_up_date=request.follow_up_date,
+        follow_up_time=request.follow_up_time,
     )
     return NoteGenerateResponse(**_encode_note_patient_id(doc))
 
@@ -237,8 +239,9 @@ def _generate_by_type(*, note_type: NoteType, request: NoteGenerateRequest) -> N
             patient_id=request.patient_id,
             visit_id=request.visit_id,
             transcription_job_id=request.transcription_job_id,
-            force_regenerate=request.follow_up_date is not None,
+            force_regenerate=request.follow_up_date is not None or bool(str(request.follow_up_time or "").strip()),
             follow_up_date=request.follow_up_date,
+            follow_up_time=request.follow_up_time,
         )
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc

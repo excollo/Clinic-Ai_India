@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
+import re
 from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
@@ -43,6 +44,7 @@ class IndiaClinicalNotePayload(BaseModel):
     red_flags: list[str]
     follow_up_in: str | None = Field(default=None, description='Use this OR follow_up_date (e.g. "7 days")')
     follow_up_date: date | None = Field(default=None, description="Use this OR follow_up_in")
+    follow_up_time: str | None = Field(default=None, description="Optional HH:MM time for follow-up appointment")
     doctor_notes: str | None = None
     chief_complaint: str | None = Field(
         default=None,
@@ -57,6 +59,9 @@ class IndiaClinicalNotePayload(BaseModel):
         has_follow_up_date = self.follow_up_date is not None
         if has_follow_up_in == has_follow_up_date:
             raise ValueError("Use exactly one of follow_up_in or follow_up_date")
+        follow_up_time = str(self.follow_up_time or "").strip()
+        if follow_up_time and not re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d", follow_up_time):
+            raise ValueError("follow_up_time must be HH:MM")
         return self
 
 
@@ -85,6 +90,10 @@ class NoteGenerateRequest(BaseModel):
     follow_up_date: date | None = Field(
         default=None,
         description="When set, stored on India clinical note as follow_up_date and used for post-visit reminder scheduling.",
+    )
+    follow_up_time: str | None = Field(
+        default=None,
+        description='Optional follow-up time in HH:MM format.',
     )
 
 
